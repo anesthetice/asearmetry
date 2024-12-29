@@ -1,0 +1,18 @@
+[project]
+name = "asearmetry"
+version = "0.1.0"
+description = "Generate binaural audio from mono audio using differential equations."
+authors = [{ name = "anesthetice" }]
+readme = "README.md"
+requires-python = ">=3.13"
+dependencies = [
+    "jax>=0.4.38",
+    "numpy>=2.2.1",
+    "pyfar>=0.7.1",
+    "pyrato>=0.4.0",
+    "scipy>=1.14.1",
+    "sofar>=1.2.1",
+]
+
+[dependency-groups]
+dev = ["codespell>=2.3.0", "pyclean>=3.0.0", "ruff>=0.8.4"]
