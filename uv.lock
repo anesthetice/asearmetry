@@ -7,6 +7,7 @@ version = "0.1.0"
 source = { virtual = "." }
 dependencies = [
     { name = "jax" },
+    { name = "matplotlib" },
     { name = "numpy" },
     { name = "pyfar" },
     { name = "pyrato" },
@@ -24,6 +25,7 @@ dev = [
 [package.metadata]
 requires-dist = [
     { name = "jax", specifier = ">=0.4.38" },
+    { name = "matplotlib", specifier = ">=3.10.0" },
     { name = "numpy", specifier = ">=2.2.1" },
     { name = "pyfar", specifier = ">=0.7.1" },
     { name = "pyrato", specifier = ">=0.4.0" },
