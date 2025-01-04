@@ -4,10 +4,10 @@ from prelude import pf, np, jax, jnp, jsp, PI
 def linear(
     desired_coords: pf.Coordinates,
     source_coords: pf.Coordinates,
-    source_coords_radius: float,
+    source_coords_radius: float | jax.Array | np.ndarray,
     hrirs: pf.Signal,
     nb_points: int = 3,
-):
+) -> pf.Signal:
     desired_coords.radius = source_coords_radius * jnp.ones(
         desired_coords.cshape[0]
     )
@@ -25,7 +25,7 @@ def linear(
         )
     )
 
-    return results
+    return results # type: ignore
 
 
 def concat_signals(signals: list[pf.Signal]):

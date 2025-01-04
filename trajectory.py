@@ -13,6 +13,9 @@ class Trajectory:
     points: jax.Array  # Mx3 matrix
     frequency: int  # in Hz
 
+    def __len__(self) -> int:
+        return self.len()
+
     def len(self) -> int:
         return self.points.shape[0]
 
@@ -111,7 +114,7 @@ class Trajectory:
         animated = ax.scatter(self.points[0, 0], self.points[0, 1], self.points[0, 2])
 
         def update(frame, *fargs):
-            animated._offsets3d = (
+            animated._offsets3d = ( # type: ignore
                 self.points[0:frame, 0],
                 self.points[0:frame, 1],
                 self.points[0:frame, 2],

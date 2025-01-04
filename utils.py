@@ -1,3 +1,4 @@
+from prelude import np
 from os import W_OK, PathLike, access
 from pathlib import Path
 
@@ -43,3 +44,6 @@ def enforce_filepath(filepath: str | PathLike, extensions: list[str]) -> Path:
             "Cannot write to specified directory, insufficient permissions"
         )
     return filepath
+
+def round_up(val, decimals=0):
+    return np.true_divide(np.ceil(val * 10**decimals), 10**decimals)
