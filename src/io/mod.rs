@@ -12,10 +12,11 @@ pub use output::write_audio_file;
 
 use polars::prelude::*;
 
-use crate::signal::{Signal, StereoSig};
+use crate::signal::{AudioBuffer, StereoAudioBuf};
 
-pub fn load_hrir() -> anyhow::Result<StereoSig> {
-    let mut reader = ParquetReader::new(std::fs::File::open("sofa_conversion/hrtf.parquet")?);
+pub fn load_hrir() -> anyhow::Result<StereoAudioBuf> {
+    let mut reader =
+        ParquetReader::new(std::fs::File::open("sofa_conversion/output/hrtf.parquet")?);
 
     let key_value_metadata = reader
         .get_metadata()?
@@ -55,5 +56,5 @@ pub fn load_hrir() -> anyhow::Result<StereoSig> {
         .flatten()
         .collect_vec();
 
-    Ok(StereoSig::new_stereo(left, right, sampling_rate))
+    Ok(StereoAudioBuf::new_stereo(left, right, sampling_rate))
 }

@@ -1,141 +1,117 @@
 // Modules
-mod borrow;
-mod convolution;
+pub mod traits;
 
 // Exports
-pub use borrow::AudioFrameRef;
-use itertools::Itertools;
+pub use traits::{AudioSignalConvolution, AudioSignalCore};
 
 // Imports
 use crate::Seconds;
 use hound::WavWriter;
 
-pub trait AudioBufferCore<'a, const CHANNELS: usize> {
-    fn is_empty(&self) -> bool;
-    fn len(&self) -> usize;
-    fn cha(&'a self, c: usize) -> &'a [f32];
-    fn get<I>(&'a self, index: I) -> AudioFrameRef<'a, CHANNELS>
-    where
-        I: std::slice::SliceIndex<[f32], Output = &'a [f32]> + Copy;
-}
-
-/// A time-synchronized frame of audio samples.
+/// A collection of per-channel sample buffers.
+///
+/// Stores audio or signal samples in a channel-major layout, with
+/// one owned buffer per channel. All buffers are expected to have
+/// the same length at all times. Samples are represented by 32-bit
+/// floating point numbers.
+///
+/// The constant generic parameter `C` refers to the number of channels.
 #[derive(Debug)]
 #[repr(transparent)]
-pub struct AudioFrame<const CHANNELS: usize>(pub(crate) [Vec<f32>; CHANNELS]);
+pub struct ChannelBuffers<const C: usize>(pub(crate) [Vec<f32>; C]);
 
-impl<'a, const CHANNELS: usize> AudioBufferCore<'a, CHANNELS> for AudioFrame<CHANNELS> {
-    fn is_empty(&self) -> bool {
-        self.0.first().map(Vec::is_empty).unwrap_or(true)
-    }
-    fn len(&self) -> usize {
-        self.0.first().map(Vec::len).unwrap_or(0)
-    }
-    fn cha(&'a self, c: usize) -> &'a [f32] {
-        self.0[c].as_slice()
-    }
-    fn get<I>(&'a self, index: I) -> AudioFrameRef<'a, CHANNELS>
-    where
-        I: std::slice::SliceIndex<[f32], Output = &'a [f32]> + Copy,
-    {
-        std::array::from_fn(|i| self.cha(i)[index]).into()
-    }
+/// A borrowed, channel-major view into sliced sample data.
+/// This is the non-owning counterpart to [`ChannelBuffers`].
+#[derive(Debug, Clone, Copy)]
+#[repr(transparent)]
+pub struct ChannelBuffersSlice<'a, const C: usize>(pub(crate) [&'a [f32]; C]);
+
+/// Represents a multichannel audio signal sampled at a fixed rate.
+/// Is composed of an [`ChannelBuffers`] structure paired with a sample rate ([`f32`]).
+#[derive(Debug)]
+pub struct AudioBuffer<const C: usize> {
+    pub(crate) inner: ChannelBuffers<C>,
+    pub(crate) sample_rate: f32,
 }
 
-impl<const CHANNELS: usize> From<[Vec<f32>; CHANNELS]> for AudioFrame<CHANNELS> {
-    fn from(value: [Vec<f32>; CHANNELS]) -> Self {
-        assert!(value.iter().map(Vec::len).all_equal());
-        Self(value)
-    }
-}
-
-impl<const CHANNELS: usize> AudioFrame<CHANNELS> {
-    pub fn into_signal(self, sampling_rate: f32) -> Signal<CHANNELS> {
-        Signal {
-            samples: self,
-            sampling_rate,
-        }
-    }
-
-    pub(crate) fn from_unchecked(value: [Vec<f32>; CHANNELS]) -> Self {
-        Self(value)
-    }
-}
-
-/// Audio signal, potentially multichannel, represented with 32-bit floating point numbers.
-pub struct Signal<const CHANNELS: usize> {
-    samples: AudioFrame<CHANNELS>,
-    pub sampling_rate: f32,
-}
-
-pub type MonoSig = Signal<1>;
-pub type StereoSig = Signal<2>;
-
-impl MonoSig {
-    pub fn new_mono(samples: Vec<f32>, sampling_rate: f32) -> Signal<1> {
-        Signal {
-            samples: AudioFrame([samples]),
-            sampling_rate,
+// [`ChannelBuffers`] specific implementations
+impl<const C: usize> ChannelBuffers<C> {
+    pub fn into_audio_buf(self, sample_rate: f32) -> AudioBuffer<C> {
+        AudioBuffer {
+            inner: self,
+            sample_rate,
         }
     }
 }
 
-impl StereoSig {
+// [`ChannelBuffersSlice`] specific implementations
+impl<'a, const C: usize> From<&'a ChannelBuffers<C>> for ChannelBuffersSlice<'a, C> {
+    fn from(value: &'a ChannelBuffers<C>) -> Self {
+        Self(std::array::from_fn(|i| value.0[i].as_slice()))
+    }
+}
+impl<'a, const C: usize> From<&ChannelBuffersSlice<'a, C>> for ChannelBuffersSlice<'a, C> {
+    fn from(value: &ChannelBuffersSlice<'a, C>) -> Self {
+        Self(value.0)
+    }
+}
+impl<'a, const C: usize> From<&'a AudioBuffer<C>> for ChannelBuffersSlice<'a, C> {
+    fn from(value: &'a AudioBuffer<C>) -> Self {
+        (&value.inner).into()
+    }
+}
+impl<'a, const C: usize> From<[&'a [f32]; C]> for ChannelBuffersSlice<'a, C> {
+    fn from(value: [&'a [f32]; C]) -> Self {
+        Self(value)
+    }
+}
+
+// [`AudioBuffer`] specific implementations
+pub type MonoAudioBuf = AudioBuffer<1>;
+pub type StereoAudioBuf = AudioBuffer<2>;
+
+impl MonoAudioBuf {
+    pub fn new_mono(samples: Vec<f32>, sample_rate: f32) -> AudioBuffer<1> {
+        AudioBuffer {
+            inner: ChannelBuffers([samples]),
+            sample_rate,
+        }
+    }
+}
+impl StereoAudioBuf {
     pub fn new_stereo(
         left_samples: Vec<f32>,
         right_samples: Vec<f32>,
-        sampling_rate: f32,
-    ) -> Signal<2> {
+        sample_rate: f32,
+    ) -> AudioBuffer<2> {
         assert_eq!(left_samples.len(), right_samples.len());
-        Signal {
-            samples: AudioFrame([left_samples, right_samples]),
-            sampling_rate,
+        AudioBuffer {
+            inner: ChannelBuffers([left_samples, right_samples]),
+            sample_rate,
         }
     }
 }
-
-impl<'a, const CHANNELS: usize> AudioBufferCore<'a, CHANNELS> for Signal<CHANNELS> {
-    fn is_empty(&self) -> bool {
-        self.samples.is_empty()
-    }
-    fn len(&self) -> usize {
-        self.samples.len()
-    }
-    fn cha(&'a self, c: usize) -> &'a [f32] {
-        self.samples.cha(c)
-    }
-    fn get<I>(&'a self, index: I) -> AudioFrameRef<'a, CHANNELS>
-    where
-        I: std::slice::SliceIndex<[f32], Output = &'a [f32]> + Copy,
-    {
-        self.samples.get(index)
-    }
-}
-
-impl<const CHANNELS: usize> Signal<CHANNELS> {
-    pub fn new<T: Into<AudioFrame<CHANNELS>>>(samples: T, sampling_rate: f32) -> Self {
+impl<const C: usize> AudioBuffer<C> {
+    pub fn new<T: Into<ChannelBuffers<C>>>(channel_bufs: T, sample_rate: f32) -> Self {
         Self {
-            samples: samples.into(),
-            sampling_rate,
+            inner: channel_bufs.into(),
+            sample_rate,
         }
     }
-
+    pub fn sample_rate(&self) -> f32 {
+        self.sample_rate
+    }
     pub fn duration(&self) -> Seconds {
-        self.len() as f32 / self.sampling_rate
+        self.len() as f32 / self.sample_rate
     }
-
-    pub fn to_borrowed(&self) -> AudioFrameRef<'_, CHANNELS> {
-        self.into()
-    }
-
     pub fn write_to<W: std::io::Write + std::io::Seek>(
         &self,
         writer: &mut WavWriter<W>,
     ) -> anyhow::Result<()> {
-        debug_assert_eq!(writer.spec().sample_rate, self.sampling_rate as u32);
+        debug_assert_eq!(writer.spec().sample_rate, self.sample_rate as u32);
 
         for i in 0..self.len() {
-            for cha in 0..CHANNELS {
+            for cha in 0..C {
                 let _ = writer.write_sample(self.cha(cha)[i]).inspect_err(|err| {
                     eprintln!("An error occured while writing wav samples, {err}")
                 });

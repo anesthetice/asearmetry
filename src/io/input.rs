@@ -1,11 +1,11 @@
-use crate::signal::MonoSig;
+use crate::signal::MonoAudioBuf;
 use std::{fs::File, path::Path};
 use symphonia::core::{
     audio::SampleBuffer, codecs::DecoderOptions, errors::Error as SymphError,
     formats::FormatOptions, io::MediaSourceStream, meta::MetadataOptions, probe::Hint,
 };
 
-pub fn read_audio_file<Q: AsRef<Path>>(filepath: Q) -> anyhow::Result<MonoSig> {
+pub fn read_audio_file<Q: AsRef<Path>>(filepath: Q) -> anyhow::Result<MonoAudioBuf> {
     let filepath = filepath.as_ref();
 
     let mss = MediaSourceStream::new(Box::new(File::open(filepath)?), Default::default());
@@ -88,5 +88,5 @@ pub fn read_audio_file<Q: AsRef<Path>>(filepath: Q) -> anyhow::Result<MonoSig> {
     }
 
     println!("Decoded {} f32 samples", samples.len());
-    Ok(MonoSig::new_mono(samples, sample_rate as f32))
+    Ok(MonoAudioBuf::new_mono(samples, sample_rate as f32))
 }
