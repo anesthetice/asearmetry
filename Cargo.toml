@@ -1,0 +1,20 @@
+[package]
+name = "asearmetry"
+version = "0.1.0"
+edition = "2024"
+
+[lib]
+name = "asearmetry"
+path = "src/lib.rs"
+
+[[bin]]
+name = "asearmetry-app"
+path = "src/app/main.rs"
+
+[dependencies]
+anyhow = { version = "1.0" }
+approx = { version = "0.5" }
+hound = { version = "3.5" }
+itertools = { version = "0.14.0" }
+polars = { version = "0.52", default-features = false, features = ["fmt", "parquet"]}
+symphonia = { version = "0.5" }

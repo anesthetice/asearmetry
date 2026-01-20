@@ -1,0 +1,16 @@
+[project]
+name = "sofa_conversion"
+version = "0.1.0"
+description = "To handle conversions from `.sofa` files."
+readme = "README.md"
+requires-python = ">=3.14"
+dependencies = [
+    "pyarrow>=22.0.0",
+    "pyfar>=0.7.3",
+    "sofar>=1.2.2",
+]
+
+[dependency-groups]
+dev = [
+    "ty>=0.0.12",
+]
