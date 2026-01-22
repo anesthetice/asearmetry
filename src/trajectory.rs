@@ -4,11 +4,15 @@ use crate::{
 };
 
 pub struct Trajectory<T> {
-    path: Vec<T>,
-    δt: Seconds,
+    pub path: Vec<T>,
+    pub δt: Seconds,
 }
 
 impl<T> Trajectory<T> {
+    pub fn delta_t(&self) -> Seconds {
+        self.δt
+    }
+
     pub fn from_equations<T1: IntoSeconds, T2: IntoSeconds>(
         eq: impl Fn(Seconds) -> T,
         t_tot: T1,

@@ -1,11 +1,12 @@
 // Modules
-pub mod traits;
+mod traits;
 
 // Exports
 pub use traits::{AudioSignalConvolution, AudioSignalCore};
 
 // Imports
 use crate::Seconds;
+use core::f32::consts::{PI, TAU};
 use hound::WavWriter;
 
 /// A collection of per-channel sample buffers.
@@ -16,7 +17,7 @@ use hound::WavWriter;
 /// floating point numbers.
 ///
 /// The constant generic parameter `C` refers to the number of channels.
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 #[repr(transparent)]
 pub struct ChannelBuffers<const C: usize>(pub(crate) [Vec<f32>; C]);
 
@@ -27,8 +28,9 @@ pub struct ChannelBuffers<const C: usize>(pub(crate) [Vec<f32>; C]);
 pub struct ChannelBuffersSlice<'a, const C: usize>(pub(crate) [&'a [f32]; C]);
 
 /// Represents a multichannel audio signal sampled at a fixed rate.
-/// Is composed of an [`ChannelBuffers`] structure paired with a sample rate ([`f32`]).
-#[derive(Debug)]
+/// It is composed of a [`ChannelBuffers`] structure paired with a
+/// sample rate ([`f32`]), measured in Hertz.
+#[derive(Debug, Clone)]
 pub struct AudioBuffer<const C: usize> {
     pub(crate) inner: ChannelBuffers<C>,
     pub(crate) sample_rate: f32,
@@ -36,11 +38,47 @@ pub struct AudioBuffer<const C: usize> {
 
 // [`ChannelBuffers`] specific implementations
 impl<const C: usize> ChannelBuffers<C> {
+    pub fn new_empty() -> Self {
+        Self(std::array::repeat(Vec::new()))
+    }
+    pub fn with_capacity(capacity: usize) -> Self {
+        Self(std::array::repeat(Vec::with_capacity(capacity)))
+    }
+    fn cha_mut(&mut self, c: usize) -> &mut [f32] {
+        self.0[c].as_mut_slice()
+    }
     pub fn into_audio_buf(self, sample_rate: f32) -> AudioBuffer<C> {
         AudioBuffer {
             inner: self,
             sample_rate,
         }
+    }
+    /// Applied collectively across all channels
+    pub fn normalize(&mut self) {
+        let max_array: [f32; C] = std::array::from_fn(|i| {
+            self.cha(i)
+                .iter()
+                .copied()
+                .map(f32::abs)
+                .reduce(f32::max)
+                .unwrap()
+        });
+        let max = max_array.into_iter().reduce(f32::max).unwrap();
+        for c in 0..C {
+            self.cha_mut(c)
+                .iter_mut()
+                .for_each(|x| *x = (*x / max).clamp(-1.0, 1.0));
+        }
+    }
+}
+impl<const C: usize> From<[Vec<f32>; C]> for ChannelBuffers<C> {
+    fn from(value: [Vec<f32>; C]) -> Self {
+        Self(value)
+    }
+}
+impl<const C: usize> From<AudioBuffer<C>> for ChannelBuffers<C> {
+    fn from(value: AudioBuffer<C>) -> Self {
+        value.inner
     }
 }
 
@@ -48,11 +86,6 @@ impl<const C: usize> ChannelBuffers<C> {
 impl<'a, const C: usize> From<&'a ChannelBuffers<C>> for ChannelBuffersSlice<'a, C> {
     fn from(value: &'a ChannelBuffers<C>) -> Self {
         Self(std::array::from_fn(|i| value.0[i].as_slice()))
-    }
-}
-impl<'a, const C: usize> From<&ChannelBuffersSlice<'a, C>> for ChannelBuffersSlice<'a, C> {
-    fn from(value: &ChannelBuffersSlice<'a, C>) -> Self {
-        Self(value.0)
     }
 }
 impl<'a, const C: usize> From<&'a AudioBuffer<C>> for ChannelBuffersSlice<'a, C> {
@@ -103,6 +136,26 @@ impl<const C: usize> AudioBuffer<C> {
     }
     pub fn duration(&self) -> Seconds {
         self.len() as f32 / self.sample_rate
+    }
+    pub fn low_pass(&self, cutoff_freq: f32) -> Self {
+        let a = TAU * cutoff_freq / (TAU * cutoff_freq + self.sample_rate);
+
+        let mut out = ChannelBuffers::<C>::with_capacity(self.len());
+
+        for c in 0..C {
+            let y_vec: &mut Vec<f32> = &mut out.0[c];
+            let mut y_prev: f32 = 0.0;
+            for x in self.cha(c) {
+                let y = (1.0 - a) * y_prev + a * x;
+                y_prev = y;
+                y_vec.push(y);
+            }
+        }
+
+        Self {
+            inner: out,
+            sample_rate: self.sample_rate,
+        }
     }
     pub fn write_to<W: std::io::Write + std::io::Seek>(
         &self,

@@ -4,7 +4,7 @@ mod spherical;
 
 // Exports
 pub use cartesian::Cart3D;
-pub use spherical::Sphere3D;
+pub use spherical::{Shell2D, Sphere3D};
 
 // Imports
 use core::f32::consts::PI;

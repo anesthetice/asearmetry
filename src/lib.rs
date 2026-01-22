@@ -1,13 +1,14 @@
 #![allow(mixed_script_confusables)]
 
 // Modules
+pub mod brp;
 pub mod coordinates;
-pub mod hrp;
 pub mod io;
 pub mod signal;
 pub mod trajectory;
 
 pub type Seconds = f32;
+pub type Radians = f32;
 
 pub trait IntoSeconds {
     fn to_seconds(self) -> Seconds;

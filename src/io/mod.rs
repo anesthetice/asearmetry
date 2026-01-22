@@ -2,21 +2,23 @@
 mod input;
 mod output;
 
-use std::collections::HashMap;
-
-use anyhow::anyhow;
 // Exports
 pub use input::read_audio_file;
-use itertools::Itertools;
 pub use output::write_audio_file;
 
+use crate::{
+    coordinates::Sphere3D,
+    signal::{AudioBuffer, StereoAudioBuf},
+};
+use anyhow::anyhow;
+use itertools::Itertools;
 use polars::prelude::*;
+use std::{collections::HashMap, path::Path};
 
-use crate::signal::{AudioBuffer, StereoAudioBuf};
-
-pub fn load_hrir() -> anyhow::Result<StereoAudioBuf> {
-    let mut reader =
-        ParquetReader::new(std::fs::File::open("sofa_conversion/output/hrtf.parquet")?);
+pub fn load_hrir_data<Q: AsRef<Path>>(
+    filepath: Q,
+) -> anyhow::Result<Vec<(Sphere3D, StereoAudioBuf)>> {
+    let mut reader = ParquetReader::new(std::fs::File::open(filepath)?);
 
     let key_value_metadata = reader
         .get_metadata()?
@@ -27,34 +29,43 @@ pub fn load_hrir() -> anyhow::Result<StereoAudioBuf> {
         .filter_map(|kv| Some((kv.key, kv.value?)))
         .collect::<HashMap<String, String>>();
 
-    let sampling_rate = key_value_metadata
-        .get("sampling_rate")
+    let sample_rate = key_value_metadata
+        .get("sample_rate")
         .ok_or_else(|| anyhow!("Missing `sampling_rate` key-value pair"))?
         .parse::<f32>()?;
 
     let df = reader.finish().unwrap();
 
-    let AnyValue::List(ref list) = df.get(200).unwrap()[3] else {
-        panic!();
+    let process_float_col = |name: &str| -> anyhow::Result<Vec<f32>> {
+        let col = df.column(name)?.f32()?;
+        Ok(col.into_no_null_iter().collect_vec())
     };
-    let left = list
-        .cast(&DataType::Float32)?
-        .f32()
-        .unwrap()
-        .into_iter()
-        .flatten()
-        .collect_vec();
 
-    let AnyValue::List(ref list) = df.get(200).unwrap()[4] else {
-        panic!();
+    let process_list_float_col = |name: &str| -> anyhow::Result<Vec<Vec<f32>>> {
+        let col = df.column(name)?.list()?;
+        Ok(col
+            .into_iter()
+            .map(|s| s.unwrap().f32().unwrap().into_no_null_iter().collect_vec())
+            .collect_vec())
     };
-    let right = list
-        .cast(&DataType::Float32)?
-        .f32()
-        .unwrap()
-        .into_iter()
-        .flatten()
-        .collect_vec();
 
-    Ok(StereoAudioBuf::new_stereo(left, right, sampling_rate))
+    let src_radius_vec = process_float_col("src_radius")?;
+    let src_azimuth_vec = process_float_col("src_azimuth")?;
+    let src_zenith_vec = process_float_col("src_zenith")?;
+    let hrir_left_vec = process_list_float_col("hrir_left")?;
+    let hrir_right_vec = process_list_float_col("hrir_right")?;
+
+    Ok(itertools::izip!(
+        src_radius_vec,
+        src_azimuth_vec,
+        src_zenith_vec,
+        hrir_left_vec,
+        hrir_right_vec
+    )
+    .map(|(radius, azimuth, zenith, hrir_left, hrir_right)| {
+        let position = Sphere3D::new(radius, azimuth, zenith).and_clamp_angles();
+        let hrir = AudioBuffer::new([hrir_left, hrir_right], sample_rate);
+        (position, hrir)
+    })
+    .collect_vec())
 }

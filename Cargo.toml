@@ -17,4 +17,14 @@ approx = { version = "0.5" }
 hound = { version = "3.5" }
 itertools = { version = "0.14.0" }
 polars = { version = "0.52", default-features = false, features = ["fmt", "parquet"]}
+rstar = { version = "0.12" }
 symphonia = { version = "0.5" }
+
+[profile.dev]
+opt-level = 1
+
+[profile.release]
+opt-level = 3
+lto = true
+strip = "symbols"
+codegen-units = 1
