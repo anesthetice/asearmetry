@@ -9,6 +9,8 @@ pub mod trajectory;
 
 pub type Seconds = f32;
 pub type Radians = f32;
+pub type Meters = f32;
+pub type Hertz = f32;
 
 pub trait IntoSeconds {
     fn to_seconds(self) -> Seconds;

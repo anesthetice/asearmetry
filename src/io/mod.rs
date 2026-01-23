@@ -5,19 +5,19 @@ mod output;
 // Exports
 pub use input::read_audio_file;
 pub use output::write_audio_file;
+use rstar::RTree;
 
 use crate::{
-    coordinates::Sphere3D,
-    signal::{AudioBuffer, StereoAudioBuf},
+    brp::{Binauralizer, HrirProjection},
+    coordinates::{Cart3D, Shell2D, Sphere3D},
+    signal::{AudioBuffer, ChannelBuffers, StereoAudioBuf},
 };
 use anyhow::anyhow;
 use itertools::Itertools;
 use polars::prelude::*;
 use std::{collections::HashMap, path::Path};
 
-pub fn load_hrir_data<Q: AsRef<Path>>(
-    filepath: Q,
-) -> anyhow::Result<Vec<(Sphere3D, StereoAudioBuf)>> {
+pub fn load_binauralizer<Q: AsRef<Path>>(filepath: Q) -> anyhow::Result<Binauralizer> {
     let mut reader = ParquetReader::new(std::fs::File::open(filepath)?);
 
     let key_value_metadata = reader
@@ -31,8 +31,31 @@ pub fn load_hrir_data<Q: AsRef<Path>>(
 
     let sample_rate = key_value_metadata
         .get("sample_rate")
-        .ok_or_else(|| anyhow!("Missing `sampling_rate` key-value pair"))?
+        .ok_or_else(|| anyhow!("Missing `sample_rate` key-value pair"))?
         .parse::<f32>()?;
+
+    let left_ear_pos: Cart3D = key_value_metadata
+        .get("left_ear_position_cartesian")
+        .ok_or_else(|| anyhow!("Missing `left_ear_position_cartesian` key-value pair"))?
+        .split(",")
+        .map(|s| s.trim().parse::<f32>().unwrap())
+        .collect_tuple::<(f32, f32, f32)>()
+        .unwrap()
+        .into();
+
+    let right_ear_pos: Cart3D = key_value_metadata
+        .get("right_ear_position_cartesian")
+        .ok_or_else(|| anyhow!("Missing `right_ear_position_cartesian` key-value pair"))?
+        .split(",")
+        .map(|s| s.trim().parse::<f32>().unwrap())
+        .collect_tuple::<(f32, f32, f32)>()
+        .unwrap()
+        .into();
+
+    println!(
+        "left ear: {:?}\nright ear: {:?}",
+        left_ear_pos, right_ear_pos
+    );
 
     let df = reader.finish().unwrap();
 
@@ -55,7 +78,17 @@ pub fn load_hrir_data<Q: AsRef<Path>>(
     let hrir_left_vec = process_list_float_col("hrir_left")?;
     let hrir_right_vec = process_list_float_col("hrir_right")?;
 
-    Ok(itertools::izip!(
+    assert!(
+        src_radius_vec.iter().all_equal(),
+        "Currently only handles cases where the radius of the source is constant."
+    );
+
+    assert!(hrir_left_vec.iter().map(Vec::len).all_equal());
+    assert!(hrir_right_vec.iter().map(Vec::len).all_equal());
+
+    let hrir_size = hrir_left_vec.first().unwrap().len();
+
+    let data = itertools::izip!(
         src_radius_vec,
         src_azimuth_vec,
         src_zenith_vec,
@@ -63,9 +96,22 @@ pub fn load_hrir_data<Q: AsRef<Path>>(
         hrir_right_vec
     )
     .map(|(radius, azimuth, zenith, hrir_left, hrir_right)| {
-        let position = Sphere3D::new(radius, azimuth, zenith).and_clamp_angles();
-        let hrir = AudioBuffer::new([hrir_left, hrir_right], sample_rate);
-        (position, hrir)
+        let position: Shell2D = Sphere3D::new(radius, azimuth, zenith).clamp_angles().into();
+        let hrir = ChannelBuffers::from([hrir_left, hrir_right]);
+        HrirProjection::new(position, hrir)
     })
-    .collect_vec())
+    .collect_vec();
+
+    let hrir_tree = RTree::bulk_load(data);
+
+    let binaur = Binauralizer {
+        hrir_tree,
+        hrir_radius: 1.0,
+        hrir_size,
+        left_ear_pos,
+        right_ear_pos,
+        hrir_sample_rate: sample_rate,
+    };
+
+    Ok(binaur)
 }

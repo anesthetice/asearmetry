@@ -1,10 +1,13 @@
 // Modules
 mod cartesian;
+mod shell;
 mod spherical;
 
 // Exports
 pub use cartesian::Cart3D;
-pub use spherical::{Shell2D, Sphere3D};
+pub use shell::Shell2D;
+pub use spherical::Sphere3D;
+pub(crate) use spherical::{clamp_azimuth, clamp_zenith};
 
 // Imports
 use core::f32::consts::PI;

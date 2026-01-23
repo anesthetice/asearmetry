@@ -222,6 +222,33 @@ pub trait AudioSignalCore<const C: usize>: Clone {
         let acc = input.next().expect("Empty input").into_owned_buf();
         input.fold(acc, |acc, other| Self::crossfade(acc, other, n_overlap))
     }
+
+    fn pad_right(self, by: usize) -> ChannelBuffers<C> {
+        let mut buf = self.into_owned_buf();
+        for c in 0..C {
+            buf.0[c].extend_from_slice(&vec![0.0; c]);
+        }
+        buf
+    }
+
+    fn as_blocks<'a>(
+        &'a self,
+        block_size: usize,
+    ) -> (Vec<ChannelBuffersSlice<'a, C>>, Option<ChannelBuffers<C>>) {
+        let lhs = (0..self.len() / block_size)
+            .map(|i| i * block_size..(i + 1) * block_size)
+            .map(|i| self.slice(i))
+            .collect_vec();
+
+        let rem = self.len() % block_size;
+        let rhs = if rem > 0 {
+            Some(self.last_n(rem).pad_right(block_size - rem))
+        } else {
+            None
+        };
+
+        (lhs, rhs)
+    }
 }
 
 impl<const C: usize> AudioSignalCore<C> for ChannelBuffers<C> {
@@ -232,6 +259,11 @@ impl<const C: usize> AudioSignalCore<C> for ChannelBuffers<C> {
         self.0.first().map(Vec::is_empty).unwrap_or(true)
     }
     fn len(&self) -> usize {
+        debug_assert!(
+            std::array::from_fn::<_, C, _>(|c| self.cha(c).len())
+                .iter()
+                .all_equal()
+        );
         self.0.first().map(Vec::len).unwrap_or(0)
     }
     fn cha(&self, c: usize) -> &[f32] {
@@ -250,6 +282,11 @@ impl<const C: usize> AudioSignalCore<C> for ChannelBuffersSlice<'_, C> {
         self.0.first().map(|arr| arr.is_empty()).unwrap_or(true)
     }
     fn len(&self) -> usize {
+        debug_assert!(
+            std::array::from_fn::<_, C, _>(|c| self.cha(c).len())
+                .iter()
+                .all_equal()
+        );
         self.0.first().map(|arr| arr.len()).unwrap_or(0)
     }
     fn cha(&self, c: usize) -> &[f32] {
@@ -268,6 +305,11 @@ impl<const C: usize> AudioSignalCore<C> for AudioBuffer<C> {
         self.inner.is_empty()
     }
     fn len(&self) -> usize {
+        debug_assert!(
+            std::array::from_fn::<_, C, _>(|c| self.cha(c).len())
+                .iter()
+                .all_equal()
+        );
         self.inner.len()
     }
     fn cha(&self, c: usize) -> &[f32] {

@@ -32,7 +32,7 @@ pub struct ChannelBuffersSlice<'a, const C: usize>(pub(crate) [&'a [f32]; C]);
 /// sample rate ([`f32`]), measured in Hertz.
 #[derive(Debug, Clone)]
 pub struct AudioBuffer<const C: usize> {
-    pub(crate) inner: ChannelBuffers<C>,
+    pub inner: ChannelBuffers<C>,
     pub(crate) sample_rate: f32,
 }
 

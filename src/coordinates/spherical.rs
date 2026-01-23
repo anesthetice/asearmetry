@@ -1,27 +1,22 @@
 use approx::{AbsDiffEq, RelativeEq};
 use std::f32::consts::{PI, TAU};
 
+use crate::{Meters, Radians};
+
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct Sphere3D {
     /// The radial distance. r ∈ ℝ
-    pub r: f32,
+    pub r: Meters,
     /// The azimuth angle. θ ∈ (-π, +π]
-    pub θ: f32,
+    pub θ: Radians,
     /// The zenith angle. φ ∈ [0, +π]
     /// Note that φ=0 corresponds to the -z direction, while φ=π corresponds to the +z direction.
-    pub φ: f32,
+    pub φ: Radians,
 }
 
 impl Sphere3D {
-    pub fn new(r: f32, θ: f32, φ: f32) -> Self {
+    pub fn new(r: Meters, θ: Radians, φ: Radians) -> Self {
         Self { r, θ, φ }
-    }
-
-    pub fn project_to_shell(&self) -> Shell2D {
-        Shell2D {
-            θ: self.θ,
-            φ: self.φ,
-        }
     }
 
     pub fn to_shell_point(&self) -> [f32; 2] {
@@ -60,20 +55,17 @@ impl Sphere3D {
         &mut self.φ
     }
 
-    pub fn clamp_angles(&mut self) {
-        if self.θ <= -PI || self.θ > PI {
-            self.θ -= self.θ.signum() * TAU * ((self.θ.abs() - PI) / TAU).ceil()
-        }
-        if self.φ < 0.0 || self.φ > PI {
-            self.φ = self.φ.abs() - TAU * (self.φ.abs() / TAU).floor();
-            if self.φ > PI {
-                self.φ = TAU - self.φ;
-            }
-        }
+    pub fn are_angles_clamped(&self) -> bool {
+        self.θ <= -PI || self.θ > PI || self.φ < 0.0 || self.φ > PI
     }
 
-    pub fn and_clamp_angles(mut self) -> Self {
-        self.clamp_angles();
+    pub fn clamp_angles_in_place(&mut self) {
+        self.θ = clamp_azimuth(self.θ);
+        self.φ = clamp_zenith(self.φ)
+    }
+
+    pub fn clamp_angles(mut self) -> Self {
+        self.clamp_angles_in_place();
         self
     }
 }
@@ -155,55 +147,19 @@ impl RelativeEq for Sphere3D {
     }
 }
 
-#[derive(Debug, Clone, Copy, PartialEq)]
-pub struct Shell2D {
-    /// The azimuth angle. θ ∈ (-π, +π]
-    pub θ: f32,
-    /// The zenith angle. φ ∈ [0, +π]
-    /// Note that φ=0 corresponds to the -z direction, while φ=π corresponds to the +z direction.
-    pub φ: f32,
+pub(crate) fn clamp_azimuth(mut θ: Radians) -> Radians {
+    if θ <= -PI || θ > PI {
+        θ -= θ.signum() * TAU * ((θ.abs() - PI) / TAU).ceil()
+    }
+    return θ;
 }
 
-impl Shell2D {
-    pub fn new(θ: f32, φ: f32) -> Self {
-        Self { θ, φ }
-    }
-    pub fn dist(&self, other: impl Into<Shell2D>) -> f32 {
-        let other = other.into();
-
-        let θ1 = self.θ;
-        let θ2 = other.θ;
-        let θ_diff = θ1.abs() - θ2.abs();
-
-        let φ1 = self.φ;
-        let φ2 = other.φ;
-        let φ_diff = φ1 - φ2;
-
-        (θ_diff.powi(2) + φ_diff.powi(2)).sqrt()
-    }
-}
-
-impl From<&[f32; 2]> for Shell2D {
-    fn from(value: &[f32; 2]) -> Self {
-        Self {
-            θ: value[0],
-            φ: value[1],
+pub(crate) fn clamp_zenith(mut φ: Radians) -> Radians {
+    if φ < 0.0 || φ > PI {
+        φ = φ.abs() - TAU * (φ.abs() / TAU).floor();
+        if φ > PI {
+            φ = TAU - φ;
         }
     }
-}
-
-impl rstar::RTreeObject for Shell2D {
-    type Envelope = rstar::AABB<[f32; 2]>;
-    fn envelope(&self) -> Self::Envelope {
-        rstar::AABB::from_point([self.θ, self.φ])
-    }
-}
-
-impl rstar::PointDistance for Shell2D {
-    fn distance_2(
-        &self,
-        point: &<Self::Envelope as rstar::Envelope>::Point,
-    ) -> <<Self::Envelope as rstar::Envelope>::Point as rstar::Point>::Scalar {
-        self.dist(point)
-    }
+    return φ;
 }

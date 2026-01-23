@@ -1,20 +1,26 @@
+use crate::Meters;
 use approx::{AbsDiffEq, RelativeEq};
 
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct Cart3D {
-    pub x: f32,
-    pub y: f32,
-    pub z: f32,
+    pub x: Meters,
+    pub y: Meters,
+    pub z: Meters,
 }
 
 impl Cart3D {
-    pub fn new(x: f32, y: f32, z: f32) -> Self {
+    pub fn new(x: Meters, y: Meters, z: Meters) -> Self {
         Self { x, y, z }
+    }
+
+    pub fn dist(&self, other: Cart3D) -> Meters {
+        ((self.x - other.x).powi(2) + (self.y - other.y).powi(2) + (self.z - other.z).powi(2))
+            .sqrt()
     }
 }
 
-impl From<(f32, f32, f32)> for Cart3D {
-    fn from(v: (f32, f32, f32)) -> Self {
+impl From<(Meters, Meters, Meters)> for Cart3D {
+    fn from(v: (Meters, Meters, Meters)) -> Self {
         Self {
             x: v.0,
             y: v.1,
@@ -23,7 +29,7 @@ impl From<(f32, f32, f32)> for Cart3D {
     }
 }
 
-impl From<Cart3D> for (f32, f32, f32) {
+impl From<Cart3D> for (Meters, Meters, Meters) {
     fn from(v: Cart3D) -> Self {
         (v.x, v.y, v.z)
     }
