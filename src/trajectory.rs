@@ -14,7 +14,7 @@ impl<T> Trajectory<T> {
     }
 
     pub fn from_equations<T1: IntoSeconds, T2: IntoSeconds>(
-        eq: impl Fn(Seconds) -> T,
+        mut eq: impl FnMut(Seconds) -> T,
         t_tot: T1,
         δt: T2,
     ) -> Self {

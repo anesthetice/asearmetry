@@ -1,113 +1,80 @@
-use std::f32::consts::{PI, TAU};
+#![allow(mixed_script_confusables)]
+#![allow(unused)]
+
+use std::f32::consts::PI;
 
 use asearmetry::{
     Seconds,
+    audio::{AudioSignal, DiscreteSignal, MonoAudioBuf},
     brp::Binauralizer,
-    coordinates::Sphere3D,
-    io,
-    signal::{AudioSignalConvolution, AudioSignalCore, ChannelBuffers, StereoAudioBuf},
+    coordinates::{Cart3D, Sphere3D},
     trajectory::Trajectory,
 };
+use rand::RngExt;
+
+fn simple_circle_trajectory(duration: Seconds) -> Trajectory<Sphere3D> {
+    Trajectory::from_equations(
+        |t| Sphere3D::new(1.0, -t * PI / 4.0, PI / 2.0),
+        duration,
+        0.005,
+    )
+}
+
+fn static_front_trajectory(duration: Seconds) -> Trajectory<Cart3D> {
+    Trajectory::from_equations(|_| Cart3D::new(1.0, 0.0, 0.0), duration, 0.05)
+}
+
+fn change_direction_trajectory(duration: Seconds) -> Trajectory<Sphere3D> {
+    let δt: f32 = 0.001;
+    let mut start_time = 0.0;
+    let mut pos = Sphere3D::new(0.7, 0.0, PI / 2.0);
+
+    let mut rng = rand::rng();
+    let distr = rand::distr::Uniform::new_inclusive(-1.0_f32, 1.0_f32).unwrap();
+    let mut θ_av: f32 = 0.0;
+    let mut φ_av: f32 = 0.0;
+
+    Trajectory::from_equations(
+        |t| {
+            if start_time == 0.0 || t - start_time > 4.0 {
+                start_time = t;
+                θ_av = rng.sample(distr) * 3.0;
+                φ_av = rng.sample(distr) * 0.6;
+            }
+            pos.θ += δt * θ_av;
+            pos.φ = (pos.φ + δt * φ_av).clamp(PI / 6.0, 5.0 * PI / 6.0);
+            pos.clamp_angles_in_place();
+            pos
+        },
+        duration,
+        δt,
+    )
+}
 
 fn main() -> anyhow::Result<()> {
-    let input = io::read_audio_file("audio/sample_01.wav")?.low_pass(10000.0);
-    let binaur = io::load_binauralizer("sofa_conversion/output/hrtf.parquet")?;
+    let input = MonoAudioBuf::load_from_file("audio/sample_04.wav")?;
+    //let input = MonoAudioBuf::sinusoidal(15.0, 48_000, 0.9, 300.0, 0.0);
+    let input_sr = input.sampling_rate().unwrap();
+
+    let binaur = Binauralizer::load_from_file("sofa_conversion/output/hrtf.parquet")?;
 
     println!(
         "input freq: {}; HRIR freq: {}",
-        input.sample_rate(),
-        binaur.hrir_sample_rate
+        input_sr, binaur.hrir_sampling_rate
     );
 
-    let trajectory = Trajectory::from_equations(
-        |t| Sphere3D::new(0.15, t, PI / 2.0).clamp_angles(),
-        input.duration(),
-        0.005,
-    );
+    let duration = input.duration().unwrap();
+    let trajectory = simple_circle_trajectory(duration);
+    //let trajectory = change_direction_trajectory(duration);
 
-    let mut out_1 = binaur.run(&input, trajectory);
-    out_1.inner = out_1.inner.normalize();
-    out_1 = out_1.low_pass(10000.0);
+    let out = binaur
+        .run(&input, trajectory)
+        //.merge_with(binaur.run(&input.delay(0.3), trajectory_2))
+        .low_pass(4000.0)
+        .normalize();
 
-    asearmetry::io::write_audio_file("audio/out_.wav", &out_1)?;
-
-    /*
-    let out_1 = {
-        let mut many_buffers: Vec<ChannelBuffers<2>> = Vec::new();
-
-        let mut index: usize = 0;
-        let mut time_slice: Seconds = 0.0;
-        let mut current = binaur
-            .hrir_tree
-            .nearest_neighbor(&trajectory.path.first().unwrap().to_shell_point())
-            .unwrap();
-
-        for (i, coord) in trajectory.path.iter().enumerate() {
-            let new = binaur
-                .hrir_tree
-                .nearest_neighbor(&coord.to_shell_point())
-                .unwrap();
-
-            if new.geom() != current.geom() || i == trajectory.path.len() - 1 {
-                println!(
-                    "{:?} ; {:?}",
-                    trajectory.path[i - 1].to_shell_point(),
-                    current.geom()
-                );
-                let n_samples_to_read = (time_slice * input.sample_rate()).ceil() as usize;
-                println!("{}", n_samples_to_read);
-                let convolved = input
-                    .slice(index..index + n_samples_to_read)
-                    .convolve(&current.data);
-                many_buffers.push(convolved);
-
-                time_slice = 0.0;
-                index += n_samples_to_read;
-                current = new;
-            }
-
-            time_slice += trajectory.δt;
-        }
-
-        <ChannelBuffers<2> as AudioSignalCore<2>>::crossfade_concatenate(
-            many_buffers,
-            current.data.len() * 1,
-        )
-        .normalize()
-    };
-
-    /*
-    let trajectory = Trajectory::from_equations(
-        |t| {
-            if t < input.duration() / 2.0 {
-                Sphere3D::new(1.0, PI / 2.0, PI / 2.0)
-            } else {
-                Sphere3D::new(1.0, -PI / 2.0, PI / 2.0)
-            }
-            .and_adjust_angles()
-        },
-        input.duration(),
-        0.05,
-    );
-    */
-
-    /*
-    let trajectory = Trajectory::from_equations(
-        |t| {
-            match t as u32 % 4 {
-                0 => Sphere3D::new(1.0, PI / 4.0, PI / 2.0),
-                1 => Sphere3D::new(1.0, 3.0 * PI / 4.0, PI / 2.0),
-                2 => Sphere3D::new(1.0, -3.0 * PI / 4.0, PI / 2.0),
-                3 => Sphere3D::new(1.0, -PI / 4.0, PI / 2.0),
-                _ => unreachable!(),
-            }
-            .and_adjust_angles()
-        },
-        input.duration(),
-        0.05,
-    );
-    */
-    */
+    println!("Writing to file");
+    out.write_to_file("audio/out.wav")?;
 
     Ok(())
 }

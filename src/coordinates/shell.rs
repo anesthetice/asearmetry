@@ -1,7 +1,10 @@
 use crate::coordinates::{Cart3D, Sphere3D};
 
 use super::{clamp_azimuth, clamp_zenith};
-use std::f32::consts::{PI, TAU};
+use std::f32::{
+    self,
+    consts::{PI, TAU},
+};
 
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct Shell2D {
@@ -39,6 +42,19 @@ impl Shell2D {
         debug_assert!(φ_diff < PI + f32::EPSILON);
 
         (θ_diff.powi(2) + φ_diff.powi(2)).sqrt()
+    }
+
+    pub fn is_nan(&self) -> bool {
+        self.θ.is_nan() || self.φ.is_nan()
+    }
+}
+
+impl Default for Shell2D {
+    fn default() -> Self {
+        Self {
+            θ: 0.0,
+            φ: PI / 2.0,
+        }
     }
 }
 

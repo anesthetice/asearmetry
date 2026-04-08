@@ -1,4 +1,4 @@
-use crate::Meters;
+use crate::{Meters, coordinates::Sphere3D};
 use approx::{AbsDiffEq, RelativeEq};
 
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -16,6 +16,21 @@ impl Cart3D {
     pub fn dist(&self, other: Cart3D) -> Meters {
         ((self.x - other.x).powi(2) + (self.y - other.y).powi(2) + (self.z - other.z).powi(2))
             .sqrt()
+    }
+
+    pub fn is_nan(&self) -> bool {
+        self.x.is_nan() || self.y.is_nan() || self.y.is_nan()
+    }
+}
+
+impl From<Sphere3D> for Cart3D {
+    fn from(v: Sphere3D) -> Self {
+        let r_xy = v.r * v.φ.sin();
+        Self {
+            x: r_xy * v.θ.cos(),
+            y: r_xy * v.θ.sin(),
+            z: -v.r * v.φ.cos(),
+        }
     }
 }
 

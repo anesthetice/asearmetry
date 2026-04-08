@@ -17,7 +17,12 @@ def to_f32_audio(x: np.ndarray) -> np.ndarray:
     return x
 
 def main():
-    sofa_data: tuple[pf.Signal, pf.Coordinates, pf.Coordinates] = pf.io.read_sofa("input/HRIRs_mannequins/KU100051023_1_processed.sofa")
+    #fp = "./input/HRIRs_mannequins/KU100051023_1_processed.sofa"
+    #fp = "./input/HRIRs/AKO536081622_1_processed.sofa"
+    fp = "./input/HRIRs/SJN145081522_1_processed.sofa"
+
+    print(f"Processing '{fp}'")
+    sofa_data: tuple[pf.Signal, pf.Coordinates, pf.Coordinates] = pf.io.read_sofa(fp)
     hrirs, source_coordinates, receiver_coordinates = sofa_data
 
     hrir_samples = to_f32_audio(hrirs.time)
@@ -52,7 +57,7 @@ def main():
                 b"David Lou Alon, Sebastia V. Amengual Gari, Paul Calamia",
             "LINK": b"https://facebookresearch.github.io/SS2_HRTF/",
             "LICENSE": b"CC-BY-4.0",
-            "sample_rate": str(int(hrirs.sampling_rate)).encode(),
+            "sampling_rate": str(int(hrirs.sampling_rate)).encode(),
             "left_ear_position_cartesian":
                 f"{receiver_coordinates.x[0, 0]}, "
                 f"{receiver_coordinates.y[0, 0]}, "

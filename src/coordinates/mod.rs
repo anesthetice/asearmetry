@@ -6,37 +6,12 @@ mod spherical;
 // Exports
 pub use cartesian::Cart3D;
 pub use shell::Shell2D;
-pub use spherical::Sphere3D;
-pub(crate) use spherical::{clamp_azimuth, clamp_zenith};
-
-// Imports
-use core::f32::consts::PI;
-
-impl From<Sphere3D> for Cart3D {
-    fn from(v: Sphere3D) -> Self {
-        let r_xy = v.r * v.φ.sin();
-        Self {
-            x: r_xy * v.θ.cos(),
-            y: r_xy * v.θ.sin(),
-            z: -v.r * v.φ.cos(),
-        }
-    }
-}
-
-impl From<Cart3D> for Sphere3D {
-    fn from(v: Cart3D) -> Self {
-        let r = (v.x.powi(2) + v.y.powi(2) + v.z.powi(2)).sqrt();
-        Self {
-            r,
-            θ: v.y.atan2(v.x),
-            φ: PI - (v.z / r).acos(),
-        }
-    }
-}
+pub use spherical::{Sphere3D, clamp_azimuth, clamp_zenith};
 
 #[cfg(test)]
 mod test {
     use super::*;
+    use std::f32::consts::PI;
 
     #[test]
     #[rustfmt::skip]

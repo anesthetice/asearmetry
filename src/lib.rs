@@ -1,10 +1,9 @@
 #![allow(mixed_script_confusables)]
 
 // Modules
+pub mod audio;
 pub mod brp;
 pub mod coordinates;
-pub mod io;
-pub mod signal;
 pub mod trajectory;
 
 pub type Seconds = f32;

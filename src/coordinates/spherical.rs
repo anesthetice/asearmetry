@@ -1,11 +1,11 @@
 use approx::{AbsDiffEq, RelativeEq};
 use std::f32::consts::{PI, TAU};
 
-use crate::{Meters, Radians};
+use crate::{Meters, Radians, coordinates::Cart3D};
 
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct Sphere3D {
-    /// The radial distance. r ∈ ℝ
+    /// The radial distance. r ∈ ℝ₊
     pub r: Meters,
     /// The azimuth angle. θ ∈ (-π, +π]
     pub θ: Radians,
@@ -67,6 +67,24 @@ impl Sphere3D {
     pub fn clamp_angles(mut self) -> Self {
         self.clamp_angles_in_place();
         self
+    }
+
+    pub fn is_nan(&self) -> bool {
+        self.r.is_nan() || self.θ.is_nan() || self.φ.is_nan()
+    }
+}
+
+impl From<Cart3D> for Sphere3D {
+    fn from(v: Cart3D) -> Self {
+        let r = (v.x.powi(2) + v.y.powi(2) + v.z.powi(2)).sqrt();
+        if r < 1E-6 {
+            println!("PANICAAAAAAAAAAAAAAAAAAAAAAAAAAA")
+        }
+        Self {
+            r,
+            θ: v.y.atan2(v.x),
+            φ: PI - (v.z / r).acos(),
+        }
     }
 }
 
@@ -147,19 +165,20 @@ impl RelativeEq for Sphere3D {
     }
 }
 
-pub(crate) fn clamp_azimuth(mut θ: Radians) -> Radians {
+pub fn clamp_azimuth(mut θ: Radians) -> Radians {
     if θ <= -PI || θ > PI {
         θ -= θ.signum() * TAU * ((θ.abs() - PI) / TAU).ceil()
     }
-    return θ;
+    θ
 }
 
-pub(crate) fn clamp_zenith(mut φ: Radians) -> Radians {
+pub fn clamp_zenith(mut φ: Radians) -> Radians {
+    #[allow(clippy::manual_range_contains)]
     if φ < 0.0 || φ > PI {
         φ = φ.abs() - TAU * (φ.abs() / TAU).floor();
         if φ > PI {
             φ = TAU - φ;
         }
     }
-    return φ;
+    φ
 }
