@@ -5,7 +5,7 @@ use std::f32::consts::PI;
 
 use asearmetry::{
     Seconds,
-    audio::{AudioSignal, DiscreteSignal, MonoAudioBuf},
+    audio::{AudioBufferSlice, AudioSignal, DiscreteSignal, MonoAudioBuf, MonoAudioBufSlice},
     brp::Binauralizer,
     coordinates::{Cart3D, Sphere3D},
     trajectory::Trajectory,
@@ -51,9 +51,28 @@ fn change_direction_trajectory(duration: Seconds) -> Trajectory<Sphere3D> {
     )
 }
 
+fn bespoke_trajectory(duration: Seconds) -> Trajectory<Sphere3D> {
+    Trajectory::from_equations(
+        |t| {
+            if t < 10.0 {
+                let θ = if ((t * 2.0) as u32).is_multiple_of(2) {
+                    -PI / 2.0
+                } else {
+                    PI / 2.0
+                };
+                Sphere3D::new(1.0, θ, PI / 2.0)
+            } else {
+                Sphere3D::new(1.0, 0.0, PI / 2.0)
+            }
+        },
+        duration,
+        1E-4,
+    )
+}
+
 fn main() -> anyhow::Result<()> {
-    let input = MonoAudioBuf::load_from_file("audio/sample_04.wav")?;
-    //let input = MonoAudioBuf::sinusoidal(15.0, 48_000, 0.9, 300.0, 0.0);
+    //let input = MonoAudioBuf::load_from_file("audio/sample_bespoke.wav")?.low_pass(14_000.0, 256);
+    let input = MonoAudioBuf::sinusoidal(15.0, 48_000, 0.9, 300.0, 0.0);
     let input_sr = input.sampling_rate().unwrap();
 
     let binaur = Binauralizer::load_from_file("sofa_conversion/output/hrtf.parquet")?;
@@ -63,18 +82,26 @@ fn main() -> anyhow::Result<()> {
         input_sr, binaur.hrir_sampling_rate
     );
 
+    let hrir = binaur.get_hrir(Sphere3D::new(1.0, 0.0, PI / 2.0));
+
+    println!(
+        "{hrir}\n\n{hrir_conv}",
+        hrir = hrir,
+        hrir_conv = hrir.convolve(MonoAudioBufSlice::from([1.0, 0.0, -1.0].as_slice()))
+    );
+
+    /*
     let duration = input.duration().unwrap();
-    let trajectory = simple_circle_trajectory(duration);
+    //let trajectory = simple_circle_trajectory(duration);
     //let trajectory = change_direction_trajectory(duration);
 
     let out = binaur
         .run(&input, trajectory)
         //.merge_with(binaur.run(&input.delay(0.3), trajectory_2))
-        .low_pass(4000.0)
         .normalize();
 
     println!("Writing to file");
     out.write_to_file("audio/out.wav")?;
-
+    */
     Ok(())
 }

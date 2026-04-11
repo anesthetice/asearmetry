@@ -1,6 +1,7 @@
+// Imports
 use crate::{
     Hertz, Radians, Seconds,
-    audio::{AudioBuffer, DiscreteSignal},
+    audio::{AudioBuffer, AudioBufferSlice, DiscreteSignal},
 };
 use std::f32::consts::TAU;
 use std::{fs::File, path::Path};
@@ -10,7 +11,10 @@ use symphonia::core::{
 };
 
 pub type MonoAudioBuf = AudioBuffer<1>;
+pub type MonoAudioBufSlice<'a> = AudioBufferSlice<'a, 1>;
+
 pub type StereoAudioBuf = AudioBuffer<2>;
+pub type StereoAudioBufSlice<'a> = AudioBufferSlice<'a, 2>;
 
 // Start of [`MonoAudioBuf`] related code
 //

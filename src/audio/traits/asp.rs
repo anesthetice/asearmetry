@@ -1,9 +1,19 @@
+use itertools::Itertools;
+
 // Imports
 use crate::{
     Seconds,
-    audio::{AudioBuffer, AudioBufferSlice, DiscreteSignal},
+    audio::{AudioBuffer, AudioBufferSlice, DiscreteSignal, MonoAudioBuf},
 };
-use std::f32::consts::TAU;
+use std::f32::consts::PI;
+
+fn sinc(x: f32) -> f32 {
+    if x != 0.0 {
+        (x * PI).sin() / (x * PI)
+    } else {
+        1.0
+    }
+}
 
 pub trait AudioSignal<const C: usize>: DiscreteSignal<C> {
     fn duration(&self) -> Option<Seconds> {
@@ -17,25 +27,44 @@ pub trait AudioSignal<const C: usize>: DiscreteSignal<C> {
         self.pad_left((by * sampling_rate).ceil() as usize)
     }
 
-    fn low_pass(&self, cutoff_freq: f32) -> AudioBuffer<C> {
-        let sampling_rate = self
-            .sampling_rate_f32()
-            .expect("Sampling rate is not defined");
+    /// The parameter M is such that the filter's number of taps (i.e. its length) is equal to 2M+1
+    #[allow(non_snake_case)]
+    fn low_pass(
+        &self,
+        cutoff_freq: f32,
+        M: usize,
+    ) -> <Self as super::DefinedConvolution<C, 1>>::ConvolutionOutput
+    where
+        Self: super::DefinedConvolution<C, 1>,
+    {
+        let num_taps = (M * 2) + 1;
+        let f_norm = cutoff_freq
+            / self
+                .sampling_rate_f32()
+                .expect("Sampling rate is not known");
 
-        let a = TAU * cutoff_freq / (TAU * cutoff_freq + sampling_rate);
-
-        let mut out = self.into_owned();
-
-        for cha in out.iter_cha_mut() {
-            let mut y_prev: f32 = 0.0;
-            cha.iter_mut().for_each(|x| {
-                let y = (1.0 - a) * y_prev + a * *x;
-                y_prev = y;
-                *x = y
-            });
+        if f_norm > 0.5 {
+            eprintln!(
+                "Warning, the provided cutoff frequency is larger than the nyquist frequency"
+            );
         }
 
-        out
+        let filter: MonoAudioBuf = (0..num_taps)
+            .map(|n| {
+                // We must offset the center of the filter by M to the right as we are in the discrete case, h[n<0]=0
+                let ideal = 2.0 * f_norm * sinc(2.0 * f_norm * (n as f32 - M as f32));
+
+                // If we returned the ideal here above we would be actually using: "h[n] = h_ideal[n] ⋅ w_rect[n]"
+                // our function would be discontinuous which is not good especially in our discrete case,
+                // see "Gibbs Phenomenon". Therefore, we use the "Hann" window function to smooth things out.
+                let hann = f32::sin(PI * n as f32 / (2 * M) as f32).powi(2);
+
+                ideal * hann
+            })
+            .collect_vec()
+            .into();
+
+        self.convolve(filter)
     }
 
     fn write_to<W: std::io::Write + std::io::Seek>(&self, writer: &mut W) -> anyhow::Result<()> {

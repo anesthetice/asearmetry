@@ -1,5 +1,8 @@
 // Imports
-use crate::audio::{AudioBuffer, AudioBufferSlice, DiscreteSignalUtils};
+use crate::{
+    Seconds,
+    audio::{AudioBuffer, AudioBufferSlice, DiscreteSignalUtils},
+};
 use itertools::Itertools;
 use std::f32::consts::PI;
 
@@ -68,6 +71,24 @@ pub trait DiscreteSignal<const C: usize>: Clone + super::DiscreteSignalUtils {
         self.slice(0..n)
     }
 
+    fn first_n_owned(self, n: usize) -> AudioBuffer<C> {
+        let mut out = self.into_owned();
+        out.iter_cha_mut().for_each(|v| v.truncate(n));
+        out
+    }
+
+    fn skip_n(&self, n: usize) -> AudioBufferSlice<'_, C> {
+        self.slice(n..)
+    }
+
+    fn skip_n_owned(self, n: usize) -> AudioBuffer<C> {
+        let mut out = self.into_owned();
+        out.iter_cha_mut().for_each(|v| {
+            v.drain(0..n);
+        });
+        out
+    }
+
     /// The first element of the returned tuple contains the first n elements.
     fn first_n_split(&self, n: usize) -> (AudioBufferSlice<'_, C>, AudioBufferSlice<'_, C>) {
         (self.slice(0..n), self.slice(n..))
@@ -75,6 +96,15 @@ pub trait DiscreteSignal<const C: usize>: Clone + super::DiscreteSignalUtils {
 
     fn last_n(&self, n: usize) -> AudioBufferSlice<'_, C> {
         self.slice(self.len() - n..)
+    }
+
+    fn last_n_owned(self, n: usize) -> AudioBuffer<C> {
+        let len = self.len();
+        let mut out = self.into_owned();
+        out.iter_cha_mut().for_each(|v| {
+            v.drain(0..(len - n));
+        });
+        out
     }
 
     /// The second element of the returned tuple contains the last n elements.
@@ -298,7 +328,7 @@ pub trait DiscreteSignal<const C: usize>: Clone + super::DiscreteSignalUtils {
 
     fn convolve<T, const C_OTHER: usize>(
         &self,
-        other: &T,
+        other: T,
     ) -> <Self as super::DefinedConvolution<C, C_OTHER>>::ConvolutionOutput
     where
         Self: super::DefinedConvolution<C, C_OTHER>,

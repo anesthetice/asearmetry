@@ -1,5 +1,3 @@
-// Struct declarations
-
 /// Represents a multichannel audio signal.
 ///
 /// Stores audio or signal samples in a channel-major layout, with
@@ -8,7 +6,7 @@
 /// floating point numbers.
 ///
 /// The constant generic parameter `C` refers to the number of channels.
-#[derive(Debug, Clone)]
+#[derive(Clone)]
 #[cfg_attr(feature = "bitcode", derive(bitcode::Decode, bitcode::Encode))]
 pub struct AudioBuffer<const C: usize> {
     pub(crate) channels: [Vec<f32>; C],
@@ -18,7 +16,7 @@ pub struct AudioBuffer<const C: usize> {
 
 /// A borrowed, channel-major view into sliced audio sample data.
 /// This is the non-owning counterpart to [`AudioBuffer`].
-#[derive(Debug, Clone, Copy)]
+#[derive(Clone, Copy)]
 pub struct AudioBufferSlice<'a, const C: usize> {
     pub(crate) channels: [&'a [f32]; C],
     /// Sampling rate in Hertz.
@@ -58,8 +56,8 @@ impl<const C: usize> AudioBuffer<C> {
         self.sampling_rate = sampling_rate;
         self
     }
-    pub fn iter_cha_mut(&mut self) -> impl Iterator<Item = &mut [f32]> {
-        self.channels.iter_mut().map(Vec::as_mut_slice)
+    pub fn iter_cha_mut(&mut self) -> impl Iterator<Item = &mut Vec<f32>> {
+        self.channels.iter_mut()
     }
 }
 
@@ -86,6 +84,15 @@ impl<const C: usize> From<([Vec<f32>; C], u32)> for AudioBuffer<C> {
         Self {
             channels: value.0,
             sampling_rate: Some(value.1),
+        }
+    }
+}
+
+impl From<Vec<f32>> for AudioBuffer<1> {
+    fn from(value: Vec<f32>) -> Self {
+        Self {
+            channels: [value],
+            sampling_rate: None,
         }
     }
 }
