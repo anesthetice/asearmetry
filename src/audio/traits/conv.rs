@@ -18,7 +18,7 @@ where
         T2: DiscreteSignal<1>,
     {
         AudioBuffer::new(
-            [_convolve(self.cha_uc(0), other.cha_uc(0))],
+            [_convolve(self._cha(0), other._cha(0))],
             Self::resolve_sampling_rate_pair(self.sampling_rate(), other.sampling_rate()),
         )
     }
@@ -34,7 +34,7 @@ where
         T2: DiscreteSignal<2>,
     {
         AudioBuffer::new(
-            std::array::from_fn(|c| _convolve(self.cha_uc(0), other.cha_uc(c))),
+            std::array::from_fn(|c| _convolve(self._cha(0), other._cha(c))),
             Self::resolve_sampling_rate_pair(self.sampling_rate(), other.sampling_rate()),
         )
     }
@@ -50,7 +50,7 @@ where
         T2: DiscreteSignal<1>,
     {
         AudioBuffer::new(
-            std::array::from_fn(|c| _convolve(self.cha_uc(c), other.cha_uc(0))),
+            std::array::from_fn(|c| _convolve(self._cha(c), other._cha(0))),
             Self::resolve_sampling_rate_pair(self.sampling_rate(), other.sampling_rate()),
         )
     }
@@ -66,7 +66,7 @@ where
         T2: DiscreteSignal<2>,
     {
         AudioBuffer::new(
-            std::array::from_fn(|c| _convolve(self.cha_uc(c), other.cha_uc(c))),
+            std::array::from_fn(|c| _convolve(self._cha(c), other._cha(c))),
             Self::resolve_sampling_rate_pair(self.sampling_rate(), other.sampling_rate()),
         )
     }

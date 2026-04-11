@@ -46,7 +46,7 @@ fn display_debug_impl<const C: usize, T: DiscreteSignal<C>>(
     ",
     sr = s.sampling_rate().map_or_else(|| "None".to_string(), |x| x.to_string()),
     len = s.len(),
-    channels = s.iter_cha().enumerate().map(|(i, cha)| {
+    channels = s._iter_cha().enumerate().map(|(i, cha)| {
         format!(
             "    ┏━━ channel {i}{opt} ━━━━\n{data}",
             opt = { if C!=2 {""} else if i==0 {" (left ear)"} else if i==1 {" (right ear)"} else {""} },

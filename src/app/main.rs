@@ -5,7 +5,9 @@ use std::f32::consts::PI;
 
 use asearmetry::{
     Seconds,
-    audio::{AudioBufferSlice, AudioSignal, DiscreteSignal, MonoAudioBuf, MonoAudioBufSlice},
+    audio::{
+        AudioBuffer, AudioBufferSlice, AudioSignal, DiscreteSignal, MonoAudioBuf, MonoAudioBufSlice,
+    },
     brp::Binauralizer,
     coordinates::{Cart3D, Sphere3D},
     trajectory::Trajectory,

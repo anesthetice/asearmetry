@@ -7,9 +7,7 @@ use itertools::Itertools;
 use std::f32::consts::PI;
 
 #[allow(private_bounds)]
-pub trait DiscreteSignal<const C: usize>: Clone + super::DiscreteSignalUtils {
-    fn as_ref<'a>(&'a self) -> AudioBufferSlice<'a, C>;
-
+pub trait DiscreteSignal<const C: usize>: Clone + DiscreteSignalUtils<C> {
     fn is_empty(&self) -> bool;
 
     fn len(&self) -> usize;
@@ -18,14 +16,6 @@ pub trait DiscreteSignal<const C: usize>: Clone + super::DiscreteSignalUtils {
 
     /// Clones data if `self` is a [`AudioBufferSlice`], returns `self` otherwise.
     fn into_owned(self) -> AudioBuffer<C>;
-
-    fn cha(&self, c: usize) -> &[f32];
-
-    /// Iterate through the channels
-    fn iter_cha(&self) -> impl Iterator<Item = &[f32]>;
-
-    /// Apply a function across channels
-    fn map_cha<'a, T>(&'a self, f: impl FnMut(&'a [f32]) -> T) -> [T; C];
 
     #[inline(always)]
     fn sampling_rate_f32(&self) -> Option<f32> {
@@ -57,28 +47,10 @@ pub trait DiscreteSignal<const C: usize>: Clone + super::DiscreteSignalUtils {
         sampling_rate
     }
 
-    fn slice<I>(&self, index: I) -> AudioBufferSlice<'_, C>
-    where
-        I: std::slice::SliceIndex<[f32], Output = [f32]> + Clone,
-    {
-        AudioBufferSlice::new(
-            self.map_cha(|cha| &cha[index.clone()]),
-            self.sampling_rate(),
-        )
-    }
-
-    fn first_n(&self, n: usize) -> AudioBufferSlice<'_, C> {
-        self.slice(0..n)
-    }
-
     fn first_n_owned(self, n: usize) -> AudioBuffer<C> {
         let mut out = self.into_owned();
         out.iter_cha_mut().for_each(|v| v.truncate(n));
         out
-    }
-
-    fn skip_n(&self, n: usize) -> AudioBufferSlice<'_, C> {
-        self.slice(n..)
     }
 
     fn skip_n_owned(self, n: usize) -> AudioBuffer<C> {
@@ -87,15 +59,6 @@ pub trait DiscreteSignal<const C: usize>: Clone + super::DiscreteSignalUtils {
             v.drain(0..n);
         });
         out
-    }
-
-    /// The first element of the returned tuple contains the first n elements.
-    fn first_n_split(&self, n: usize) -> (AudioBufferSlice<'_, C>, AudioBufferSlice<'_, C>) {
-        (self.slice(0..n), self.slice(n..))
-    }
-
-    fn last_n(&self, n: usize) -> AudioBufferSlice<'_, C> {
-        self.slice(self.len() - n..)
     }
 
     fn last_n_owned(self, n: usize) -> AudioBuffer<C> {
@@ -107,11 +70,6 @@ pub trait DiscreteSignal<const C: usize>: Clone + super::DiscreteSignalUtils {
         out
     }
 
-    /// The second element of the returned tuple contains the last n elements.
-    fn last_n_split(&self, n: usize) -> (AudioBufferSlice<'_, C>, AudioBufferSlice<'_, C>) {
-        (self.slice(..self.len() - n), self.slice(self.len() - n..))
-    }
-
     fn merge<T1, T2>(a: T1, b: T2) -> AudioBuffer<C>
     where
         T1: DiscreteSignal<C>,
@@ -120,16 +78,16 @@ pub trait DiscreteSignal<const C: usize>: Clone + super::DiscreteSignalUtils {
         let sampling_rate = Self::resolve_sampling_rate_pair(a.sampling_rate(), b.sampling_rate());
 
         let (mut acc, other) = if a.len() >= b.len() {
-            (a.into_owned(), b.as_ref())
+            (a.into_owned(), b._as_ref())
         } else {
-            (b.into_owned(), a.as_ref())
+            (b.into_owned(), a._as_ref())
         };
 
         for (cha_acc, cha_other) in acc.iter_cha_mut().zip(other.iter_cha()) {
             cha_acc.iter_mut().zip(cha_other).for_each(|(l, r)| *l += r)
         }
 
-        acc.with_sampling_rate(sampling_rate)
+        acc.with_sr_opt(sampling_rate)
     }
 
     fn merge_with<T>(self, other: T) -> AudioBuffer<C>
@@ -159,12 +117,12 @@ pub trait DiscreteSignal<const C: usize>: Clone + super::DiscreteSignalUtils {
             .into_owned();
 
         for other in input {
-            for (cha_acc, cha_other) in acc.iter_cha_mut().zip(other.iter_cha()) {
+            for (cha_acc, cha_other) in acc.iter_cha_mut().zip(other._iter_cha()) {
                 cha_acc.iter_mut().zip(cha_other).for_each(|(l, r)| *l += r)
             }
         }
 
-        acc.with_sampling_rate(sampling_rate)
+        acc.with_sr_opt(sampling_rate)
     }
 
     fn apply<F>(self, op: F) -> AudioBuffer<C>
@@ -191,7 +149,7 @@ pub trait DiscreteSignal<const C: usize>: Clone + super::DiscreteSignalUtils {
     }
 
     fn get_abs_max(&self) -> f32 {
-        self.iter_cha()
+        self._iter_cha()
             .map(|cha| cha.iter().copied().map(f32::abs).reduce(f32::max).unwrap())
             .reduce(f32::max)
             .unwrap()
@@ -236,7 +194,7 @@ pub trait DiscreteSignal<const C: usize>: Clone + super::DiscreteSignalUtils {
         let mut out = AudioBuffer::<C>::with_capacity(capacity, sampling_rate);
 
         for buf in input.into_iter() {
-            for (cha, other) in out.channels.iter_mut().zip(buf.iter_cha()) {
+            for (cha, other) in out.channels.iter_mut().zip(buf._iter_cha()) {
                 cha.extend_from_slice(other);
             }
         }
@@ -253,8 +211,8 @@ pub trait DiscreteSignal<const C: usize>: Clone + super::DiscreteSignalUtils {
         #[allow(non_snake_case)]
         let N = n_overlap;
 
-        let (start, mid_1) = first.last_n_split(N);
-        let (mid_2, end) = second.first_n_split(N);
+        let (start, mid_1) = first._as_ref().last_n_split(N);
+        let (mid_2, end) = second._as_ref().first_n_split(N);
 
         let transition = Self::merge(
             mid_1.apply_with_context(|(n, x_n)| {
@@ -280,50 +238,19 @@ pub trait DiscreteSignal<const C: usize>: Clone + super::DiscreteSignalUtils {
 
     fn pad_right(self, by: usize) -> AudioBuffer<C> {
         let mut buf = self.into_owned();
-        buf.channels
-            .iter_mut()
-            .for_each(|buf| buf.extend(vec![0.0; by]));
+        buf.iter_cha_mut().for_each(|buf| buf.extend(vec![0.0; by]));
         buf
     }
 
     fn pad_left(self, by: usize) -> AudioBuffer<C> {
         AudioBuffer::new(
-            self.map_cha(|cha| {
+            self._map_cha(|cha| {
                 let mut vec: Vec<f32> = vec![0.0; by];
                 vec.extend_from_slice(cha);
                 vec
             }),
             self.sampling_rate(),
         )
-    }
-
-    fn as_blocks<'a>(&'a self, block_size: usize) -> Vec<AudioBufferSlice<'a, C>> {
-        let rem = self.len() % block_size;
-        let rhs = (rem > 0).then(|| self.last_n(rem));
-
-        (0..self.len() / block_size)
-            .map(|i| i * block_size..(i + 1) * block_size)
-            .map(|i| self.slice(i))
-            .chain(rhs)
-            .collect_vec()
-    }
-
-    fn as_blocks_strict<'a>(
-        &'a self,
-        block_size: usize,
-    ) -> (
-        Vec<AudioBufferSlice<'a, C>>,
-        Option<AudioBufferSlice<'a, C>>,
-    ) {
-        let lhs = (0..self.len() / block_size)
-            .map(|i| i * block_size..(i + 1) * block_size)
-            .map(|i| self.slice(i))
-            .collect_vec();
-
-        let rem = self.len() % block_size;
-        let rhs = (rem > 0).then(|| self.last_n(rem));
-
-        (lhs, rhs)
     }
 
     fn convolve<T, const C_OTHER: usize>(
@@ -340,7 +267,7 @@ pub trait DiscreteSignal<const C: usize>: Clone + super::DiscreteSignalUtils {
     fn interleaved_samples_f32(&self) -> Vec<f32> {
         let size = self.len() * C;
         let mut out: Vec<f32> = vec![0.0; size];
-        for (cha_idx, cha) in self.iter_cha().enumerate() {
+        for (cha_idx, cha) in self._iter_cha().enumerate() {
             cha.iter()
                 .copied()
                 .enumerate()
@@ -352,7 +279,7 @@ pub trait DiscreteSignal<const C: usize>: Clone + super::DiscreteSignalUtils {
     fn interleaved_samples_i16(&self) -> Vec<i16> {
         let size = self.len() * C;
         let mut out: Vec<i16> = vec![0; size];
-        for (cha_idx, cha) in self.iter_cha().enumerate() {
+        for (cha_idx, cha) in self._iter_cha().enumerate() {
             cha.iter()
                 .copied()
                 .enumerate()
@@ -363,9 +290,6 @@ pub trait DiscreteSignal<const C: usize>: Clone + super::DiscreteSignalUtils {
 }
 
 impl<const C: usize> DiscreteSignal<C> for AudioBuffer<C> {
-    fn as_ref<'a>(&'a self) -> AudioBufferSlice<'a, C> {
-        self.into()
-    }
     fn is_empty(&self) -> bool {
         self.channels.first().map(Vec::is_empty).unwrap_or(true)
     }
@@ -380,21 +304,9 @@ impl<const C: usize> DiscreteSignal<C> for AudioBuffer<C> {
     fn into_owned(self) -> AudioBuffer<C> {
         self
     }
-    fn cha(&self, c: usize) -> &[f32] {
-        &self.channels[c]
-    }
-    fn iter_cha(&self) -> impl Iterator<Item = &[f32]> {
-        self.channels.iter().map(Vec::as_slice)
-    }
-    fn map_cha<'a, T>(&'a self, mut f: impl FnMut(&'a [f32]) -> T) -> [T; C] {
-        std::array::from_fn(|c| f(self.cha_uc(c)))
-    }
 }
 
 impl<const C: usize> DiscreteSignal<C> for AudioBufferSlice<'_, C> {
-    fn as_ref<'a>(&'a self) -> AudioBufferSlice<'a, C> {
-        *self
-    }
     fn is_empty(&self) -> bool {
         self.channels
             .first()
@@ -412,24 +324,12 @@ impl<const C: usize> DiscreteSignal<C> for AudioBufferSlice<'_, C> {
     fn into_owned(self) -> AudioBuffer<C> {
         AudioBuffer::new(self.map_cha(|cha| cha.to_vec()), self.sampling_rate)
     }
-    fn cha(&self, c: usize) -> &[f32] {
-        self.channels[c]
-    }
-    fn iter_cha(&self) -> impl Iterator<Item = &[f32]> {
-        self.channels.into_iter()
-    }
-    fn map_cha<'a, T>(&'a self, mut f: impl FnMut(&'a [f32]) -> T) -> [T; C] {
-        std::array::from_fn(|c| f(self.cha_uc(c)))
-    }
 }
 
 impl<const C: usize, T> DiscreteSignal<C> for &T
 where
     T: DiscreteSignal<C>,
 {
-    fn as_ref<'a>(&'a self) -> AudioBufferSlice<'a, C> {
-        (*self).as_ref()
-    }
     fn is_empty(&self) -> bool {
         (*self).is_empty()
     }
@@ -441,14 +341,5 @@ where
     }
     fn into_owned(self) -> AudioBuffer<C> {
         (*self).clone().into_owned()
-    }
-    fn cha(&self, c: usize) -> &[f32] {
-        (*self).cha(c)
-    }
-    fn iter_cha(&self) -> impl Iterator<Item = &[f32]> {
-        (*self).iter_cha()
-    }
-    fn map_cha<'a, T2>(&'a self, f: impl FnMut(&'a [f32]) -> T2) -> [T2; C] {
-        (*self).map_cha(f)
     }
 }

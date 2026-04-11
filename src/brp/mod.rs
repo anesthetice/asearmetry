@@ -63,7 +63,7 @@ impl Binauralizer {
 
         // LTV convolution starts here
         //
-        let x = src.cha_uc(0);
+        let x = src._cha(0);
 
         if x.is_empty() || self.hrir_size == 0 {
             return StereoAudioBuf::new_empty();

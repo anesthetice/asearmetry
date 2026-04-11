@@ -45,7 +45,7 @@ impl MonoAudioBuf {
         let ω = TAU * frequency;
 
         AudioBuffer::new_zeros(nb_samples)
-            .with_sampling_rate(Some(sampling_rate))
+            .with_sr(sampling_rate)
             .apply_with_context(|(n, _)| amplitude * f32::sin((n as f32) * δt * ω + phase_offset))
     }
 
