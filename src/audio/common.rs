@@ -1,5 +1,17 @@
+//! Why not include all of this in the [`DiscreteSignal`] trait? Because then for instance
+//! the declaration of `cha` would have to be `fn cha(&self, c: usize) -> &[f32]`. And
+//! even if we used `fn cha(&self, c: usize) -> &'a [f32]`, the prior lifetime "squash"
+//! would still apply to this function and thus the returned value would not be able
+//! to outlive our `AudioBufferSlice<'a, C>` instead of the lifetime `'a` on which
+//! it truly depends on.
+//!
+//! To be fair I'm not sure if this is worth the added cost in bad ergonomics.
+//!
+//! Maybe I could use a macro to generate all of this instead, but probably not worth it at this point.
+
 use crate::audio::{AudioBuffer, AudioBufferSlice, DiscreteSignal};
 
+#[allow(unused)]
 impl<const C: usize> AudioBuffer<C> {
     pub fn as_ref(&self) -> AudioBufferSlice<'_, C> {
         self.into()
@@ -68,6 +80,7 @@ impl<const C: usize> AudioBuffer<C> {
     }
 }
 
+#[allow(unused)]
 impl<'a, const C: usize> AudioBufferSlice<'a, C> {
     pub fn as_ref(&self) -> AudioBufferSlice<'a, C> {
         *self
