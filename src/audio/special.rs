@@ -46,7 +46,7 @@ impl MonoAudioBuf {
 
         AudioBuffer::new_zeros(nb_samples)
             .with_sr(sampling_rate)
-            .apply_with_context(|(n, _)| amplitude * f32::sin((n as f32) * δt * ω + phase_offset))
+            .apply_enumerate(&mut |(n, _)| amplitude * f32::sin((n as f32) * δt * ω + phase_offset))
     }
 
     /// Load data from an audio file, works for audio files whose codec is supported

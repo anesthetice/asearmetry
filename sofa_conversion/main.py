@@ -38,8 +38,8 @@ def main():
             "src_radius": np.float32(source_coordinates.radius[n]),
             "src_azimuth": np.float32(source_coordinates.azimuth[n]),
             "src_zenith": np.float32(pi - source_coordinates.colatitude[n]),
-            "hrir_left": hrirs.time[n, 0, :],
-            "hrir_right": hrirs.time[n, 1, :],
+            "hrir_left": hrir_samples[n, 0, :],
+            "hrir_right": hrir_samples[n, 1, :],
         })
 
     schema = pa.schema(

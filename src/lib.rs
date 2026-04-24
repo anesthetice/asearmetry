@@ -4,6 +4,7 @@
 pub mod audio;
 pub mod brp;
 pub mod coordinates;
+pub mod stat;
 pub mod trajectory;
 
 pub type Seconds = f32;

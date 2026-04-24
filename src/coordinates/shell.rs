@@ -1,18 +1,41 @@
-use crate::coordinates::{Cart3D, Sphere3D};
-
 use super::{clamp_azimuth, clamp_zenith};
+use crate::coordinates::{Cart3D, Sphere3D};
 use std::f32::{
     self,
     consts::{PI, TAU},
 };
 
-#[derive(Debug, Clone, Copy, PartialEq)]
+#[derive(Clone, Copy, PartialEq)]
+#[cfg_attr(feature = "bitcode", derive(bitcode::Encode, bitcode::Decode))]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub struct Shell2D {
     /// The azimuth angle. θ ∈ (-π, +π]
     pub θ: f32,
     /// The zenith angle. φ ∈ [0, +π]
     /// Note that φ=0 corresponds to the -z direction, while φ=π corresponds to the +z direction.
     pub φ: f32,
+}
+
+impl std::fmt::Debug for Shell2D {
+    #[rustfmt::skip]
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        let θ_opi = self.θ / PI;
+        if θ_opi.abs() == 0.0 { write!(f, "(θ: 0.0")? }
+        else if θ_opi.abs() > 0.001 { write!(f, "(θ: π⋅{θ_opi:.3}")? }
+        else { write!(f, "(θ: π⋅{θ_opi:.1E}")? };
+
+        let φ_opi = self.φ / PI;
+        if φ_opi.abs() == 0.0 { write!(f, ", φ: 0.0)")? }
+        if φ_opi.abs() > 0.001 { write!(f, ", φ: π⋅{φ_opi:.3})")? }
+        else { write!(f, ", φ: π⋅{φ_opi:.1E})")? };
+        Ok(())
+    }
+}
+
+impl std::fmt::Display for Shell2D {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        std::fmt::Debug::fmt(&self, f)
+    }
 }
 
 impl Shell2D {

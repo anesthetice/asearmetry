@@ -47,6 +47,11 @@ fn display_debug_impl<const C: usize, T: DiscreteSignal<C>>(
     sr = s.sampling_rate().map_or_else(|| "None".to_string(), |x| x.to_string()),
     len = s.len(),
     channels = s._iter_cha().enumerate().map(|(i, cha)| {
+        let spine: &str = if f.alternate() {
+            "     "
+        } else {
+            "    ┃ "
+        };
         format!(
             "    ┏━━ channel {i}{opt} ━━━━\n{data}",
             opt = { if C!=2 {""} else if i==0 {" (left ear)"} else if i==1 {" (right ear)"} else {""} },
@@ -58,13 +63,12 @@ fn display_debug_impl<const C: usize, T: DiscreteSignal<C>>(
                     .map(|chunk| chunk.as_slice())
                     .chain((!rem.is_empty()).then_some(rem))
                     .for_each(|chunk| {
-                        out.push_str("    ┃ ");
-                        for (i, x) in chunk.iter().enumerate() {
-                            if i > 0 {out.push_str(", ")}
+                        out.push_str(spine);
+                        for x in chunk.iter() {
                             if x.abs() > 0.001 || x.abs() == 0.0 {
-                                write!(&mut out, "{:.3}", x).unwrap();
+                                write!(&mut out, "{x:.3}, ").unwrap();
                             } else {
-                                write!(&mut out, "{:.1E}", x).unwrap();
+                                write!(&mut out, "{x:.1E}, ").unwrap();
                             }
                         }
                         out.push('\n');

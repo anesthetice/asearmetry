@@ -1,9 +1,10 @@
+use crate::{Meters, Radians, coordinates::Cart3D};
 use approx::{AbsDiffEq, RelativeEq};
 use std::f32::consts::{PI, TAU};
 
-use crate::{Meters, Radians, coordinates::Cart3D};
-
-#[derive(Debug, Clone, Copy, PartialEq)]
+#[derive(Clone, Copy, PartialEq)]
+#[cfg_attr(feature = "bitcode", derive(bitcode::Encode, bitcode::Decode))]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub struct Sphere3D {
     /// The radial distance. r ∈ ℝ₊
     pub r: Meters,
@@ -12,6 +13,34 @@ pub struct Sphere3D {
     /// The zenith angle. φ ∈ [0, +π]
     /// Note that φ=0 corresponds to the -z direction, while φ=π corresponds to the +z direction.
     pub φ: Radians,
+}
+
+impl std::fmt::Debug for Sphere3D {
+    #[rustfmt::skip]
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "")?;
+        if self.r.abs() == 0.0 { write!(f, "(r: 0.0")? }
+        else if self.r.abs() > 0.001 { write!(f, "(r: {:.3}", self.r)? }
+        else { write!(f, "(r: {:.1E}", self.r)? };
+
+        let θ_opi = self.θ / PI;
+        if θ_opi.abs() == 0.0 { write!(f, ", θ: 0.0")? }
+        else if θ_opi.abs() > 0.001 { write!(f, ", θ: π⋅{θ_opi:.3}")? }
+        else { write!(f, ", θ: π⋅{θ_opi:.1E}")? };
+
+        let φ_opi = self.φ / PI;
+        if φ_opi.abs() == 0.0 { write!(f, ", φ: 0.0)")? }
+        if φ_opi.abs() > 0.001 { write!(f, ", φ: π⋅{φ_opi:.3})")? }
+        else { write!(f, ", φ: π⋅{φ_opi:.1E})")? };
+
+        Ok(())
+    }
+}
+
+impl std::fmt::Display for Sphere3D {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        std::fmt::Debug::fmt(&self, f)
+    }
 }
 
 impl Sphere3D {

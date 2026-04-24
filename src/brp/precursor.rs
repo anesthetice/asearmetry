@@ -1,0 +1,205 @@
+// Imports
+use crate::{
+    Meters,
+    audio::{AudioSignal, DiscreteSignal, StereoAudioBuf},
+    brp::{Binauralizer, HrirProjection},
+    coordinates::{Cart3D, Shell2D},
+};
+use anyhow::anyhow;
+use itertools::Itertools;
+use polars::prelude::*;
+use std::{collections::HashMap, path::Path};
+
+#[derive(Debug, Clone)]
+pub struct BinauralizerPrecursor {
+    pub hrir_vec: Vec<StereoAudioBuf>,
+    pub hrir_pos_vec: Vec<Shell2D>,
+    pub hrir_radius: Meters,
+    pub hrir_size: usize,
+    pub hrir_sampling_rate: u32,
+    pub left_ear_pos: Cart3D,
+    pub right_ear_pos: Cart3D,
+}
+
+impl BinauralizerPrecursor {
+    pub fn load_from_file<Q: AsRef<Path>>(filepath: Q) -> anyhow::Result<Self> {
+        let mut reader = ParquetReader::new(std::fs::File::open(filepath)?);
+
+        let key_value_metadata = reader
+            .get_metadata()?
+            .key_value_metadata
+            .clone()
+            .ok_or_else(|| anyhow::anyhow!("Missing key-value metadata in parquet file"))?
+            .into_iter()
+            .filter_map(|kv| Some((kv.key, kv.value?)))
+            .collect::<HashMap<String, String>>();
+
+        let hrir_sampling_rate = key_value_metadata
+            .get("sampling_rate")
+            .ok_or_else(|| anyhow!("Missing `sampling_rate` key-value pair"))?
+            .parse::<u32>()?;
+
+        let left_ear_pos: Cart3D = key_value_metadata
+            .get("left_ear_position_cartesian")
+            .ok_or_else(|| anyhow!("Missing `left_ear_position_cartesian` key-value pair"))?
+            .split(",")
+            .map(|s| s.trim().parse::<f32>().unwrap())
+            .collect_tuple::<(f32, f32, f32)>()
+            .ok_or_else(|| {
+                anyhow!(
+                    "Invalid `left_ear_position_cartesian` value, could not extract (f32; 3) tuple"
+                )
+            })?
+            .into();
+
+        let right_ear_pos: Cart3D = key_value_metadata
+            .get("right_ear_position_cartesian")
+            .ok_or_else(|| anyhow!("Missing `right_ear_position_cartesian` key-value pair"))?
+            .split(",")
+            .map(|s| s.trim().parse::<f32>().unwrap())
+            .collect_tuple::<(f32, f32, f32)>()
+            .ok_or_else(|| {
+                anyhow!(
+                    "Invalid `left_ear_position_cartesian` value, could not extract (f32; 3) tuple"
+                )
+            })?
+            .into();
+
+        println!(
+            "left ear: {:?}\nright ear: {:?}",
+            left_ear_pos, right_ear_pos
+        );
+
+        let df = reader.finish().unwrap();
+
+        let process_float_col = |name: &str| -> anyhow::Result<Vec<f32>> {
+            let col = df.column(name)?.f32()?;
+            Ok(col.into_no_null_iter().collect_vec())
+        };
+
+        let process_list_float_col = |name: &str| -> anyhow::Result<Vec<Vec<f32>>> {
+            let col = df.column(name)?.list()?;
+            Ok(col
+                .into_iter()
+                .map(|s| s.unwrap().f32().unwrap().into_no_null_iter().collect_vec())
+                .collect_vec())
+        };
+
+        let src_radius_vec = process_float_col("src_radius")?;
+        let src_azimuth_vec = process_float_col("src_azimuth")?;
+        let src_zenith_vec = process_float_col("src_zenith")?;
+        let hrir_left_vec = process_list_float_col("hrir_left")?;
+        let hrir_right_vec = process_list_float_col("hrir_right")?;
+
+        assert!(
+            src_radius_vec.iter().all_equal(),
+            "Currently only handles cases where the radius of the source is constant."
+        );
+        let hrir_radius = *src_radius_vec.first().unwrap();
+
+        assert!(hrir_left_vec.iter().map(Vec::len).all_equal());
+        assert!(hrir_right_vec.iter().map(Vec::len).all_equal());
+        assert_eq!(
+            hrir_left_vec.first().map(|v| v.len()),
+            hrir_right_vec.first().map(|v| v.len())
+        );
+
+        let hrir_size = hrir_left_vec.first().unwrap().len();
+
+        let hrir_vec = itertools::izip!(hrir_left_vec, hrir_right_vec)
+            .map(|(hrir_left, hrir_right)| {
+                StereoAudioBuf::from([hrir_left, hrir_right]).with_sr(hrir_sampling_rate)
+            })
+            .collect_vec();
+
+        let hrir_pos_vec = itertools::izip!(src_azimuth_vec, src_zenith_vec,)
+            .map(|(azimuth, zenith)| Shell2D::new(azimuth, zenith).clamp_angles())
+            .collect_vec();
+
+        Ok(BinauralizerPrecursor {
+            hrir_vec,
+            hrir_pos_vec,
+            hrir_radius,
+            hrir_size,
+            hrir_sampling_rate,
+            left_ear_pos,
+            right_ear_pos,
+        })
+    }
+
+    pub fn into_binauralizer(mut self) -> Binauralizer {
+        // The first important step is to remove the delay in the HRIRs
+        let mut max_len: usize = 0;
+        self.hrir_vec.iter_mut().for_each(|hrir| {
+            let hrir_spike_smooth = hrir
+                .clone()
+                .abs()
+                .apply_median_filter(4)
+                .apply_gaussian_filter(4, 0.33)
+                .normalize_to(hrir.get_abs_max());
+
+            let find_start = |c: usize| {
+                let (μ, σ) = {
+                    let slice = &hrir_spike_smooth.cha_uc(c)[0..10];
+                    (crate::stat::mean(slice), crate::stat::std(slice, 1))
+                };
+                let threshold = μ + 10.0 * σ;
+                hrir_spike_smooth
+                    .cha_uc(c)
+                    .iter()
+                    .find_position(|x| **x > threshold)
+                    .unwrap()
+                    .0
+            };
+
+            let left_start = find_start(0);
+            let right_start = find_start(1);
+
+            max_len = max_len
+                .max(self.hrir_size - left_start)
+                .max(self.hrir_size - right_start);
+
+            hrir.cha_mut_uc(0).drain(0..left_start);
+            hrir.cha_mut_uc(1).drain(0..right_start);
+        });
+
+        let hrir_rtree = rstar::RTree::bulk_load(
+            self.hrir_vec
+                .into_iter()
+                .zip(self.hrir_pos_vec)
+                .map(|(mut hrir, pos)| {
+                    hrir = hrir.pad_right_with_last_to_len(max_len);
+                    HrirProjection::new(pos, hrir)
+                })
+                .collect(),
+        );
+
+        Binauralizer {
+            hrir_rtree,
+            hrir_radius: self.hrir_radius,
+            hrir_size: max_len,
+            hrir_sampling_rate: self.hrir_sampling_rate,
+            left_ear_pos: self.left_ear_pos,
+            right_ear_pos: self.right_ear_pos,
+        }
+    }
+
+    pub fn into_binauralizer_no_processing(self) -> Binauralizer {
+        let hrir_rtree = rstar::RTree::bulk_load(
+            self.hrir_vec
+                .into_iter()
+                .zip(self.hrir_pos_vec)
+                .map(|(hrir, pos)| HrirProjection::new(pos, hrir))
+                .collect(),
+        );
+
+        Binauralizer {
+            hrir_rtree,
+            hrir_radius: self.hrir_radius,
+            hrir_size: self.hrir_size,
+            hrir_sampling_rate: self.hrir_sampling_rate,
+            left_ear_pos: self.left_ear_pos,
+            right_ear_pos: self.right_ear_pos,
+        }
+    }
+}

@@ -92,8 +92,6 @@ fn _convolve(lhs: &[f32], rhs: &[f32]) -> Vec<f32> {
                 end: usize::min(lhs.len(), n + 1),
             };
 
-            //println!("n={n}, k ∈ {k_range:?}");
-
             for k in k_range {
                 val += lhs.get_unchecked(k) * rhs.get_unchecked(n - k);
             }

@@ -3,6 +3,9 @@ use crate::{
     coordinates::{Cart3D, Sphere3D},
 };
 
+#[derive(Debug, Clone, PartialEq)]
+#[cfg_attr(feature = "bitcode", derive(bitcode::Encode, bitcode::Decode))]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub struct Trajectory<T> {
     pub path: Vec<T>,
     pub δt: Seconds,

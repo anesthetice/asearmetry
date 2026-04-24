@@ -1,8 +1,11 @@
 // Modules
-#[cfg(feature = "polars")]
-mod load;
+mod store;
 
-use std::{f32, num::FpCategory};
+#[cfg(feature = "polars")]
+mod precursor;
+
+// Exports
+pub use precursor::BinauralizerPrecursor;
 
 // Imports
 use crate::{
@@ -15,11 +18,14 @@ use crate::{
     trajectory::Trajectory,
 };
 use rstar::{RTree, primitives::GeomWithData};
+use std::{f32, num::FpCategory};
 
 pub type HrirProjection = GeomWithData<Shell2D, AudioBuffer<2>>;
 
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
+#[derive(Debug, Clone)]
 pub struct Binauralizer {
-    pub hrir_tree: RTree<HrirProjection>,
+    pub hrir_rtree: RTree<HrirProjection>,
     pub hrir_radius: Meters,
     pub hrir_size: usize,
     pub hrir_sampling_rate: u32,
@@ -50,15 +56,37 @@ impl Binauralizer {
             .take_while(|(_, src_end_idx)| *src_end_idx < src.len())
             .chain(std::iter::once((final_position, usize::MAX)));
 
+        let get_hrir_with_delay = |pos: T| {
+            let hrir = self.get_hrir(pos);
+            let n_left_delay = (self.hrir_sampling_rate as f32 * pos.into().dist(self.left_ear_pos)
+                / 340.0)
+                .round() as usize;
+            let l_hrir = {
+                let mut vec: Vec<f32> = vec![0.0; n_left_delay];
+                vec.extend_from_slice(hrir.cha_uc(0));
+                vec
+            };
+
+            let n_right_delay =
+                (self.hrir_sampling_rate as f32 * pos.into().dist(self.right_ear_pos) / 340.0)
+                    .round() as usize;
+            let r_hrir = {
+                let mut vec: Vec<f32> = vec![0.0; n_right_delay];
+                vec.extend_from_slice(hrir.cha_uc(1));
+                vec
+            };
+            StereoAudioBuf::new([l_hrir, r_hrir], Some(self.hrir_sampling_rate))
+        };
+
         let (mut position, mut src_end_idx) = position_with_src_end_idx.next().unwrap();
-        let mut hrir = self.get_hrir(position);
+        let mut hrir = get_hrir_with_delay(position);
 
         let mut h = |n: usize| {
             if n > src_end_idx {
                 (position, src_end_idx) = position_with_src_end_idx.next().unwrap();
-                hrir = self.get_hrir(position);
+                hrir = get_hrir_with_delay(position);
             }
-            hrir
+            hrir.clone()
         };
 
         // LTV convolution starts here
@@ -82,16 +110,24 @@ impl Binauralizer {
 
             for n in 0..max_n {
                 let h_n = h(n); // time-varying impulse response at "time" n
-                let h_n_len = h_n.len();
+                let h_n_len = h_n.lens();
+
                 let h_n_left = h_n.cha_uc(0);
                 let h_n_right = h_n.cha_uc(1);
 
                 // k ∈ [max(0, n - h_n_len + 1), min(n+1, x.len()))
-                let k_start = (n + 1).saturating_sub(h_n_len);
+                let k_start = (n + 1).saturating_sub(h_n_len[0]);
                 let k_end = usize::min(x.len(), n + 1);
 
                 for k in k_start..k_end {
                     y_left += x.get_unchecked(k) * h_n_left.get_unchecked(n - k);
+                    //y_right += x.get_unchecked(k) * h_n_right.get_unchecked(n - k);
+                }
+
+                // k ∈ [max(0, n - h_n_len + 1), min(n+1, x.len()))
+                let k_start = (n + 1).saturating_sub(h_n_len[1]);
+                for k in k_start..k_end {
+                    //y_left += x.get_unchecked(k) * h_n_left.get_unchecked(n - k);
                     y_right += x.get_unchecked(k) * h_n_right.get_unchecked(n - k);
                 }
 
@@ -155,16 +191,16 @@ impl Binauralizer {
             if query.is_nan() {
                 println!("Shell2D is nan: {query:?}\n{pos:?} -> {xyz_1:?}, {xyz_2:?}")
             }
-            self.hrir_tree
+            self.hrir_rtree
                 .nearest_neighbor(&query.into())
                 .unwrap()
                 .data
-                .as_ref()
+                .view()
         };
 
         AudioBufferSlice::from([
-            inner_compute(self.left_ear_pos).channels[0],
-            inner_compute(self.left_ear_pos).channels[1],
+            inner_compute(self.left_ear_pos).cha_uc(0),
+            inner_compute(self.left_ear_pos).cha_uc(1),
         ])
     }
 

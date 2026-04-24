@@ -37,6 +37,9 @@ impl<const C: usize> AudioBuffer<C> {
     pub fn cha_mut(&mut self, c: usize) -> &mut Vec<f32> {
         &mut self.channels[c]
     }
+    pub(crate) fn cha_mut_uc(&mut self, c: usize) -> &mut Vec<f32> {
+        unsafe { self.channels.get_unchecked_mut(c) }
+    }
     pub fn iter_cha_mut(&mut self) -> impl Iterator<Item = &mut Vec<f32>> {
         self.channels.iter_mut()
     }

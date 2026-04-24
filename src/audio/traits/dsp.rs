@@ -10,12 +10,24 @@ use std::f32::consts::PI;
 pub trait DiscreteSignal<const C: usize>: Clone + DiscreteSignalUtils<C> {
     fn is_empty(&self) -> bool;
 
-    fn len(&self) -> usize;
-
     fn sampling_rate(&self) -> Option<u32>;
 
-    /// Clones data if `self` is a [`AudioBufferSlice`], returns `self` otherwise.
+    /// Clones data if `self` is a [`AudioBufferSlice`], returns `self` if already a [`AudioBuffer`].
     fn into_owned(self) -> AudioBuffer<C>;
+
+    fn len(&self) -> usize {
+        // Checks that all channels have the same length
+        debug_assert!(self._map_cha(|cha| cha.len()).iter().all_equal());
+        self._chas().first().map(|cha| cha.len()).unwrap_or(0)
+    }
+
+    fn lens(&self) -> [usize; C] {
+        self._map_cha(|cha| cha.len())
+    }
+
+    fn max_len(&self) -> usize {
+        self.lens().into_iter().max().unwrap_or(0)
+    }
 
     #[inline(always)]
     fn sampling_rate_f32(&self) -> Option<f32> {
@@ -47,13 +59,20 @@ pub trait DiscreteSignal<const C: usize>: Clone + DiscreteSignalUtils<C> {
         sampling_rate
     }
 
+    fn seconds_to_index(&self, s: Seconds) -> usize {
+        let Some(sampling_rate) = self.sampling_rate_f32() else {
+            panic!("Sampling rate not defined");
+        };
+        (sampling_rate * s).floor() as usize
+    }
+
     fn first_n_owned(self, n: usize) -> AudioBuffer<C> {
         let mut out = self.into_owned();
         out.iter_cha_mut().for_each(|v| v.truncate(n));
         out
     }
 
-    fn skip_n_owned(self, n: usize) -> AudioBuffer<C> {
+    fn skip_first_n_owned(self, n: usize) -> AudioBuffer<C> {
         let mut out = self.into_owned();
         out.iter_cha_mut().for_each(|v| {
             v.drain(0..n);
@@ -70,6 +89,15 @@ pub trait DiscreteSignal<const C: usize>: Clone + DiscreteSignalUtils<C> {
         out
     }
 
+    fn skip_last_n_owned(self, n: usize) -> AudioBuffer<C> {
+        let t_len = self.len() - n;
+        let mut out = self.into_owned();
+        out.iter_cha_mut().for_each(|v| {
+            v.truncate(t_len);
+        });
+        out
+    }
+
     fn merge<T1, T2>(a: T1, b: T2) -> AudioBuffer<C>
     where
         T1: DiscreteSignal<C>,
@@ -78,9 +106,9 @@ pub trait DiscreteSignal<const C: usize>: Clone + DiscreteSignalUtils<C> {
         let sampling_rate = Self::resolve_sampling_rate_pair(a.sampling_rate(), b.sampling_rate());
 
         let (mut acc, other) = if a.len() >= b.len() {
-            (a.into_owned(), b._as_ref())
+            (a.into_owned(), b._as_view())
         } else {
-            (b.into_owned(), a._as_ref())
+            (b.into_owned(), a._as_view())
         };
 
         for (cha_acc, cha_other) in acc.iter_cha_mut().zip(other.iter_cha()) {
@@ -125,27 +153,54 @@ pub trait DiscreteSignal<const C: usize>: Clone + DiscreteSignalUtils<C> {
         acc.with_sr_opt(sampling_rate)
     }
 
-    fn apply<F>(self, op: F) -> AudioBuffer<C>
+    fn apply<F>(self, mut op: F) -> AudioBuffer<C>
     where
-        F: Fn(f32) -> f32 + Copy,
+        F: FnMut(f32) -> f32,
     {
         let mut out = self.into_owned();
         out.iter_cha_mut()
-            .for_each(|cha| cha.iter_mut().for_each(|x| *x = op(*x)));
+            .for_each(|cha| cha.iter_mut().for_each(|x| *x = (&mut op)(*x)));
         out
     }
 
-    fn apply_with_context<F>(self, op: F) -> AudioBuffer<C>
+    fn apply_enumerate<F>(self, mut op: F) -> AudioBuffer<C>
     where
-        F: Fn((usize, f32)) -> f32 + Copy,
+        F: FnMut((usize, f32)) -> f32,
     {
         let mut out = self.into_owned();
         out.iter_cha_mut().for_each(|cha| {
             cha.iter_mut()
                 .enumerate()
-                .for_each(|(n, x)| *x = op((n, *x)))
+                .for_each(|(n, x)| *x = (&mut op)((n, *x)))
         });
         out
+    }
+
+    #[allow(non_snake_case)]
+    /// The parameter M is such that the window is "M elements - center element - M elements".
+    /// Of course, for elements near the boundary, their window size will be less than 2M+1 and
+    /// not centered directly on themselves (i.e. near left, right side of the window is larger than left).
+    fn apply_centered_window<F>(&self, M: usize, mut op: F) -> AudioBuffer<C>
+    where
+        F: for<'a> FnMut(&[f32]) -> f32,
+    {
+        let channels = self._map_cha(|cha| {
+            let mut buffer: Vec<f32> = Vec::with_capacity(cha.len());
+            for i in 0..cha.len() {
+                let range = i.saturating_sub(M)..(i + M + 1).min(cha.len());
+                let x = unsafe { cha.get_unchecked(range) };
+                buffer.push((&mut op)(x))
+            }
+            buffer
+        });
+        AudioBuffer {
+            channels,
+            sampling_rate: self.sampling_rate(),
+        }
+    }
+
+    fn abs(self) -> AudioBuffer<C> {
+        self.apply(|x| x.abs())
     }
 
     fn get_abs_max(&self) -> f32 {
@@ -155,11 +210,42 @@ pub trait DiscreteSignal<const C: usize>: Clone + DiscreteSignalUtils<C> {
             .unwrap()
     }
 
+    fn get_abs_max_index(&self) -> usize {
+        self._iter_cha()
+            .map(|cha| {
+                cha.iter()
+                    .copied()
+                    .map(f32::abs)
+                    .enumerate()
+                    .reduce(|a, b| if a.1 > b.1 { a } else { b })
+                    .unwrap()
+            })
+            .reduce(|a, b| if a.1 > b.1 { a } else { b })
+            .unwrap()
+            .0
+    }
+
     fn normalize(self) -> AudioBuffer<C> {
-        let abs_max = self.get_abs_max();
         let mut out = self.into_owned();
+        let abs_max = out.get_abs_max();
+        if abs_max == 0.0 {
+            return out;
+        }
+        let factor = 1.0 / abs_max;
         out.iter_cha_mut()
-            .for_each(|cha| cha.iter_mut().for_each(|x| *x /= abs_max));
+            .for_each(|cha| cha.iter_mut().for_each(|x| *x *= factor));
+        out
+    }
+
+    fn normalize_to(self, val: f32) -> AudioBuffer<C> {
+        let mut out = self.into_owned();
+        let abs_max = out.get_abs_max();
+        if abs_max == 0.0 {
+            return out;
+        }
+        let factor = val / abs_max;
+        out.iter_cha_mut()
+            .for_each(|cha| cha.iter_mut().for_each(|x| *x *= factor));
         out
     }
 
@@ -211,19 +297,19 @@ pub trait DiscreteSignal<const C: usize>: Clone + DiscreteSignalUtils<C> {
         #[allow(non_snake_case)]
         let N = n_overlap;
 
-        let (start, mid_1) = first._as_ref().last_n_split(N);
-        let (mid_2, end) = second._as_ref().first_n_split(N);
+        let (start, mid_1) = first._as_view().last_n_split(N);
+        let (mid_2, end) = second._as_view().first_n_split(N);
 
         let transition = Self::merge(
-            mid_1.apply_with_context(|(n, x_n)| {
+            mid_1.apply_enumerate(&mut |(n, x_n)| {
                 (PI * n as f32 / (2.0 * N as f32)).cos().powi(2) * x_n
             }),
-            mid_2.apply_with_context(|(n, x_n)| {
+            mid_2.apply_enumerate(&mut |(n, x_n)| {
                 (PI * n as f32 / (2.0 * N as f32)).sin().powi(2) * x_n
             }),
         );
 
-        Self::concatenate([start, transition.as_ref(), end])
+        Self::concatenate([start, transition._as_view(), end])
     }
 
     fn crossfade_concatenate<T, I>(input: I, n_overlap: usize) -> AudioBuffer<C>
@@ -242,6 +328,40 @@ pub trait DiscreteSignal<const C: usize>: Clone + DiscreteSignalUtils<C> {
         buf
     }
 
+    fn pad_right_to_len(self, len: usize) -> AudioBuffer<C> {
+        let mut buf = self.into_owned();
+        buf.iter_cha_mut().for_each(|buf| {
+            let by = len.saturating_sub(buf.len());
+            buf.extend(vec![0.0; by])
+        });
+        buf
+    }
+
+    fn pad_right_with(self, by: usize, val: f32) -> AudioBuffer<C> {
+        let mut buf = self.into_owned();
+        buf.iter_cha_mut().for_each(|buf| buf.extend(vec![val; by]));
+        buf
+    }
+
+    fn pad_right_with_last(self, by: usize) -> AudioBuffer<C> {
+        let mut buf = self.into_owned();
+        buf.iter_cha_mut().for_each(|buf| {
+            let val = *buf.last().unwrap_or(&0.0);
+            buf.extend(vec![val; by])
+        });
+        buf
+    }
+
+    fn pad_right_with_last_to_len(self, len: usize) -> AudioBuffer<C> {
+        let mut buf = self.into_owned();
+        buf.iter_cha_mut().for_each(|buf| {
+            let by = len.saturating_sub(buf.len());
+            let val = *buf.last().unwrap_or(&0.0);
+            buf.extend(vec![val; by])
+        });
+        buf
+    }
+
     fn pad_left(self, by: usize) -> AudioBuffer<C> {
         AudioBuffer::new(
             self._map_cha(|cha| {
@@ -253,15 +373,60 @@ pub trait DiscreteSignal<const C: usize>: Clone + DiscreteSignalUtils<C> {
         )
     }
 
-    fn convolve<T, const C_OTHER: usize>(
+    fn pad_left_with(self, by: usize, val: f32) -> AudioBuffer<C> {
+        AudioBuffer::new(
+            self._map_cha(|cha| {
+                let mut vec: Vec<f32> = vec![val; by];
+                vec.extend_from_slice(cha);
+                vec
+            }),
+            self.sampling_rate(),
+        )
+    }
+
+    fn pad_left_with_first(self, by: usize) -> AudioBuffer<C> {
+        AudioBuffer::new(
+            self._map_cha(|cha| {
+                let val = *cha.first().unwrap_or(&0.0);
+                let mut vec: Vec<f32> = vec![val; by];
+                vec.extend_from_slice(cha);
+                vec
+            }),
+            self.sampling_rate(),
+        )
+    }
+
+    fn convolve<T, const C2: usize>(
         &self,
-        other: T,
-    ) -> <Self as super::DefinedConvolution<C, C_OTHER>>::ConvolutionOutput
+        h: T,
+    ) -> <Self as super::DefinedConvolution<C, C2>>::ConvolutionOutput
     where
-        Self: super::DefinedConvolution<C, C_OTHER>,
-        T: DiscreteSignal<C_OTHER>,
+        Self: super::DefinedConvolution<C, C2>,
+        T: DiscreteSignal<C2>,
     {
-        self.convolve_with(other)
+        self.convolve_with(h)
+    }
+
+    /// Similar to using `numpy.convolve(a, v, mode='same')`, we keep the output "aligned" with
+    /// our input; left-biased in the case where the filter `h` has an even length.
+    fn convolve_then_crop<T, const C2: usize, const C_OUT: usize>(&self, h: T) -> AudioBuffer<C_OUT>
+    where
+        Self: super::DefinedConvolution<C, C2, ConvolutionOutput = AudioBuffer<C_OUT>>,
+        T: DiscreteSignal<C2>,
+    {
+        let filter_size = h.len();
+        let y = self.convolve_with(h);
+
+        #[allow(non_snake_case)]
+        let M = filter_size / 2;
+
+        if filter_size % 2 == 1 {
+            // the ideal case, from M to N-M-1
+            y.skip_first_n_owned(M).skip_last_n_owned(M)
+        } else {
+            eprintln!("Warning, filter length is even");
+            y.skip_first_n_owned(M - 1).skip_last_n_owned(M)
+        }
     }
 
     fn interleaved_samples_f32(&self) -> Vec<f32> {
@@ -287,16 +452,34 @@ pub trait DiscreteSignal<const C: usize>: Clone + DiscreteSignalUtils<C> {
         }
         out
     }
+
+    #[cfg(feature = "plot")]
+    fn plot(&self) -> Vec<kuva::prelude::Plot> {
+        use kuva::prelude::*;
+
+        self._map_cha_enumerate(|i, cha| {
+            let legend: String = match i {
+                0 => "channel 0 (left ear)".to_string(),
+                1 => "channel 1 (right ear)".to_string(),
+                i => format!("channel {i}"),
+            };
+            let palette = Palette::wong();
+            let color = &palette.colors()[i % palette.len()];
+
+            LinePlot::new()
+                .with_data(cha.iter().enumerate().map(|(x, y)| (x as f64, *y as f64)))
+                .with_color(color)
+                .with_legend(legend)
+        })
+        .into_iter()
+        .map(Plot::from)
+        .collect()
+    }
 }
 
 impl<const C: usize> DiscreteSignal<C> for AudioBuffer<C> {
     fn is_empty(&self) -> bool {
         self.channels.first().map(Vec::is_empty).unwrap_or(true)
-    }
-    fn len(&self) -> usize {
-        // Checks that all channels have the same length
-        debug_assert!(self.map_cha(|cha| cha.len()).iter().all_equal());
-        self.channels.first().map(Vec::len).unwrap_or(0)
     }
     fn sampling_rate(&self) -> Option<u32> {
         self.sampling_rate
@@ -313,11 +496,6 @@ impl<const C: usize> DiscreteSignal<C> for AudioBufferSlice<'_, C> {
             .map(|cha| cha.is_empty())
             .unwrap_or(true)
     }
-    fn len(&self) -> usize {
-        // Checks that all channels have the same length
-        debug_assert!(self.map_cha(|cha| cha.len()).iter().all_equal());
-        self.channels.first().map(|cha| cha.len()).unwrap_or(0)
-    }
     fn sampling_rate(&self) -> Option<u32> {
         self.sampling_rate
     }
@@ -332,9 +510,6 @@ where
 {
     fn is_empty(&self) -> bool {
         (*self).is_empty()
-    }
-    fn len(&self) -> usize {
-        (*self).len()
     }
     fn sampling_rate(&self) -> Option<u32> {
         (*self).sampling_rate()

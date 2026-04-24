@@ -1,11 +1,32 @@
 use crate::{Meters, coordinates::Sphere3D};
 use approx::{AbsDiffEq, RelativeEq};
 
-#[derive(Debug, Clone, Copy, PartialEq)]
+#[derive(Clone, Copy, PartialEq)]
+#[cfg_attr(feature = "bitcode", derive(bitcode::Encode, bitcode::Decode))]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub struct Cart3D {
     pub x: Meters,
     pub y: Meters,
     pub z: Meters,
+}
+
+impl std::fmt::Debug for Cart3D {
+    #[rustfmt::skip]
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "(x: ")?;
+        if self.x.abs() > 0.001 { write!(f, "{:.3}", self.x)? } else { write!(f, "{:.1E}", self.x)? };
+        write!(f, ", y: ")?;
+        if self.y.abs() > 0.001 { write!(f, "{:.3}", self.y)? } else { write!(f, "{:.1E}", self.y)? };
+        write!(f, ", z: ")?;
+        if self.z.abs() > 0.001 { write!(f, "{:.3})", self.z)? } else { write!(f, "{:.1E})", self.z)? };
+        Ok(())
+    }
+}
+
+impl std::fmt::Display for Cart3D {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        std::fmt::Debug::fmt(&self, f)
+    }
 }
 
 impl Cart3D {

@@ -1,10 +1,9 @@
-use itertools::Itertools;
-
 // Imports
 use crate::{
     Seconds,
     audio::{AudioBuffer, AudioBufferSlice, DiscreteSignal, MonoAudioBuf},
 };
+use itertools::Itertools;
 use std::f32::consts::PI;
 
 fn sinc(x: f32) -> f32 {
@@ -27,15 +26,16 @@ pub trait AudioSignal<const C: usize>: DiscreteSignal<C> {
         self.pad_left((by * sampling_rate).ceil() as usize)
     }
 
-    /// The parameter M is such that the filter's number of taps (i.e. its length) is equal to 2M+1
+    /// The parameter M is such that the filter's number of taps (i.e. its length) is equal to 2M+1.
+    /// This is to ensure that the filter's length is odd.
     #[allow(non_snake_case)]
-    fn low_pass(
+    fn apply_low_pass_filter(
         &self,
         cutoff_freq: f32,
         M: usize,
     ) -> <Self as super::DefinedConvolution<C, 1>>::ConvolutionOutput
     where
-        Self: super::DefinedConvolution<C, 1>,
+        Self: super::DefinedConvolution<C, 1, ConvolutionOutput = AudioBuffer<C>>,
     {
         let num_taps = (M * 2) + 1;
         let f_norm = cutoff_freq
@@ -64,7 +64,51 @@ pub trait AudioSignal<const C: usize>: DiscreteSignal<C> {
             .collect_vec()
             .into();
 
-        self.convolve(filter)
+        self.convolve_then_crop(filter)
+    }
+
+    /// The parameter M is such that the filter's number of taps (i.e. its length) is equal to 2M+1.
+    /// This is to ensure that the filter's length is odd.
+    #[allow(non_snake_case)]
+    fn apply_median_filter(&self, M: usize) -> AudioBuffer<C> {
+        self.apply_centered_window(M, |x| {
+            let mut vec = x.to_vec();
+            vec.sort_unstable_by(f32::total_cmp);
+            if vec.len() % 2 == 1 {
+                vec[vec.len() / 2]
+            } else {
+                0.5 * (vec[vec.len() / 2 - 1] + vec[vec.len() / 2])
+            }
+        })
+    }
+
+    /// The parameter M is such that the filter's number of taps (i.e. its length) is equal to 2M+1.
+    /// This is to ensure that the filter's length is odd.
+    #[allow(non_snake_case)]
+    fn apply_gaussian_filter(
+        &self,
+        M: usize,
+        a: f32,
+    ) -> <Self as super::DefinedConvolution<C, 1>>::ConvolutionOutput
+    where
+        Self: super::DefinedConvolution<C, 1, ConvolutionOutput = AudioBuffer<C>>,
+    {
+        let num_taps = (M * 2) + 1;
+        let filter: MonoAudioBuf = (0..num_taps)
+            .map(|n| {
+                // We must offset the center of the filter by M to the right as we are in the discrete case, h[n<0]=0
+                let x = n as f32 - M as f32;
+                let ideal = f32::sqrt(a / PI) * f32::exp(-a * x.powi(2));
+
+                // Once again we use the Hann window function to avoid the "Gibbs Phenomenon".
+                let hann = f32::sin(PI * n as f32 / (2 * M) as f32).powi(2);
+
+                ideal * hann
+            })
+            .collect_vec()
+            .into();
+
+        self.convolve_then_crop(filter)
     }
 
     fn write_to<W: std::io::Write + std::io::Seek>(&self, writer: &mut W) -> anyhow::Result<()> {
