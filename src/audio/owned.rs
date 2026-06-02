@@ -1,7 +1,7 @@
-use crate::audio::AudioBuffer;
+use crate::{audio::AudioBuffer, math::Hertz};
 
 impl<const C: usize> AudioBuffer<C> {
-    pub fn new(channels: [Vec<f32>; C], sampling_rate: Option<u32>) -> Self {
+    pub fn new(channels: [Vec<f32>; C], sampling_rate: Option<Hertz>) -> Self {
         Self {
             channels,
             sampling_rate,
@@ -19,18 +19,26 @@ impl<const C: usize> AudioBuffer<C> {
             sampling_rate: None,
         }
     }
-    pub fn with_capacity(per_channel_capacity: usize, sampling_rate: Option<u32>) -> Self {
+    pub fn with_capacity(per_channel_capacity: usize, sampling_rate: Option<Hertz>) -> Self {
         Self {
             // Do not use `std::array::repeat` as cloning a vector will not preserve capacity
             channels: std::array::from_fn(|_| Vec::with_capacity(per_channel_capacity)),
             sampling_rate,
         }
     }
-    pub fn with_sr(mut self, sampling_rate: u32) -> Self {
+    pub fn with_sr(mut self, sampling_rate: Hertz) -> Self {
         self.sampling_rate = Some(sampling_rate);
         self
     }
-    pub fn with_sr_opt(mut self, sampling_rate: Option<u32>) -> Self {
+    pub fn set_sr(&mut self, sampling_rate: Hertz) -> &mut Self {
+        self.sampling_rate = Some(sampling_rate);
+        self
+    }
+    pub fn with_sr_opt(mut self, sampling_rate: Option<Hertz>) -> Self {
+        self.sampling_rate = sampling_rate;
+        self
+    }
+    pub fn set_sr_opt(&mut self, sampling_rate: Option<Hertz>) -> &mut Self {
         self.sampling_rate = sampling_rate;
         self
     }
@@ -54,8 +62,8 @@ impl<const C: usize> From<[Vec<f32>; C]> for AudioBuffer<C> {
     }
 }
 
-impl<const C: usize> From<([Vec<f32>; C], Option<u32>)> for AudioBuffer<C> {
-    fn from(value: ([Vec<f32>; C], Option<u32>)) -> Self {
+impl<const C: usize> From<([Vec<f32>; C], Option<Hertz>)> for AudioBuffer<C> {
+    fn from(value: ([Vec<f32>; C], Option<Hertz>)) -> Self {
         Self {
             channels: value.0,
             sampling_rate: value.1,
@@ -63,8 +71,8 @@ impl<const C: usize> From<([Vec<f32>; C], Option<u32>)> for AudioBuffer<C> {
     }
 }
 
-impl<const C: usize> From<([Vec<f32>; C], u32)> for AudioBuffer<C> {
-    fn from(value: ([Vec<f32>; C], u32)) -> Self {
+impl<const C: usize> From<([Vec<f32>; C], Hertz)> for AudioBuffer<C> {
+    fn from(value: ([Vec<f32>; C], Hertz)) -> Self {
         Self {
             channels: value.0,
             sampling_rate: Some(value.1),
@@ -102,7 +110,7 @@ where
     where
         D: serde::Deserializer<'de>,
     {
-        let tuple: ([Vec<f32>; C], Option<u32>) = serde::Deserialize::deserialize(deserializer)?;
+        let tuple: ([Vec<f32>; C], Option<Hertz>) = serde::Deserialize::deserialize(deserializer)?;
         Ok(AudioBuffer::from(tuple))
     }
 }

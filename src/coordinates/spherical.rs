@@ -1,6 +1,9 @@
-use crate::{Meters, Radians, coordinates::Cart3D};
+use crate::{
+    coordinates::Cart3D,
+    math::{Meters, Radians},
+};
 use approx::{AbsDiffEq, RelativeEq};
-use std::f32::consts::{PI, TAU};
+use std::f64::consts::{PI, TAU};
 
 #[derive(Clone, Copy, PartialEq)]
 #[cfg_attr(feature = "bitcode", derive(bitcode::Encode, bitcode::Decode))]
@@ -18,20 +21,23 @@ pub struct Sphere3D {
 impl std::fmt::Debug for Sphere3D {
     #[rustfmt::skip]
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(f, "")?;
-        if self.r.abs() == 0.0 { write!(f, "(r: 0.0")? }
-        else if self.r.abs() > 0.001 { write!(f, "(r: {:.3}", self.r)? }
-        else { write!(f, "(r: {:.1E}", self.r)? };
+        let write_float = |float: f64, f: &mut std::fmt::Formatter<'_>| {
+            if float.abs() > 1E-3 { write!(f, "{:.3}", float) }
+            else if float.abs() < 1E-6 { write!(f, "0.0") }
+            else { write!(f, "{:.1E}", float) }
+        };
+
+        write!(f, "(r: ")?;
+        write_float(self.r, f)?;
 
         let θ_opi = self.θ / PI;
-        if θ_opi.abs() == 0.0 { write!(f, ", θ: 0.0")? }
-        else if θ_opi.abs() > 0.001 { write!(f, ", θ: π⋅{θ_opi:.3}")? }
-        else { write!(f, ", θ: π⋅{θ_opi:.1E}")? };
+        write!(f, ", θ: π⋅")?;
+        write_float(θ_opi, f)?;
 
         let φ_opi = self.φ / PI;
-        if φ_opi.abs() == 0.0 { write!(f, ", φ: 0.0)")? }
-        if φ_opi.abs() > 0.001 { write!(f, ", φ: π⋅{φ_opi:.3})")? }
-        else { write!(f, ", φ: π⋅{φ_opi:.1E})")? };
+        write!(f, ", φ: π⋅")?;
+        write_float(φ_opi, f)?;
+        write!(f, ")")?;
 
         Ok(())
     }
@@ -48,39 +54,39 @@ impl Sphere3D {
         Self { r, θ, φ }
     }
 
-    pub fn to_shell_point(&self) -> [f32; 2] {
+    pub fn to_shell_point(&self) -> [Radians; 2] {
         [self.θ, self.φ]
     }
 
-    pub fn theta(&self) -> f32 {
+    pub fn theta(&self) -> Radians {
         self.θ
     }
 
-    pub fn theta_mut(&mut self) -> &mut f32 {
+    pub fn theta_mut(&mut self) -> &mut Radians {
         &mut self.θ
     }
 
-    pub fn azimuth(&self) -> f32 {
+    pub fn azimuth(&self) -> Radians {
         self.θ
     }
 
-    pub fn azimuth_mut(&mut self) -> &mut f32 {
+    pub fn azimuth_mut(&mut self) -> &mut Radians {
         &mut self.θ
     }
 
-    pub fn phi(&self) -> f32 {
+    pub fn phi(&self) -> Radians {
         self.φ
     }
 
-    pub fn phi_mut(&mut self) -> &mut f32 {
+    pub fn phi_mut(&mut self) -> &mut Radians {
         &mut self.φ
     }
 
-    pub fn zenith(&self) -> f32 {
+    pub fn zenith(&self) -> Radians {
         self.φ
     }
 
-    pub fn zenith_mut(&mut self) -> &mut f32 {
+    pub fn zenith_mut(&mut self) -> &mut Radians {
         &mut self.φ
     }
 
@@ -101,14 +107,20 @@ impl Sphere3D {
     pub fn is_nan(&self) -> bool {
         self.r.is_nan() || self.θ.is_nan() || self.φ.is_nan()
     }
+
+    pub fn is_finite(&self) -> bool {
+        self.r.is_finite() && self.θ.is_finite() && self.φ.is_finite()
+    }
+
+    pub fn is_null(&self) -> bool {
+        // Under IEEE 754, -0.0 is equal to 0.0
+        self.r == 0.0 && self.θ == 0.0 && self.φ == 0.0
+    }
 }
 
 impl From<Cart3D> for Sphere3D {
     fn from(v: Cart3D) -> Self {
         let r = (v.x.powi(2) + v.y.powi(2) + v.z.powi(2)).sqrt();
-        if r < 1E-6 {
-            println!("PANICAAAAAAAAAAAAAAAAAAAAAAAAAAA")
-        }
         Self {
             r,
             θ: v.y.atan2(v.x),
@@ -117,8 +129,8 @@ impl From<Cart3D> for Sphere3D {
     }
 }
 
-impl From<(f32, f32, f32)> for Sphere3D {
-    fn from(v: (f32, f32, f32)) -> Self {
+impl From<(f64, f64, f64)> for Sphere3D {
+    fn from(v: (f64, f64, f64)) -> Self {
         Self {
             r: v.0,
             θ: v.1,
@@ -127,7 +139,7 @@ impl From<(f32, f32, f32)> for Sphere3D {
     }
 }
 
-impl From<Sphere3D> for (f32, f32, f32) {
+impl From<Sphere3D> for (f64, f64, f64) {
     fn from(v: Sphere3D) -> Self {
         (v.r, v.θ, v.φ)
     }
@@ -150,37 +162,37 @@ impl<T: Into<Self>> std::ops::Add<T> for Sphere3D {
     }
 }
 
-impl std::ops::MulAssign<f32> for Sphere3D {
-    fn mul_assign(&mut self, rhs: f32) {
+impl std::ops::MulAssign<f64> for Sphere3D {
+    fn mul_assign(&mut self, rhs: f64) {
         self.r *= rhs;
         self.θ *= rhs;
         self.φ *= rhs;
     }
 }
 
-impl std::ops::Mul<f32> for Sphere3D {
+impl std::ops::Mul<f64> for Sphere3D {
     type Output = Self;
-    fn mul(mut self, rhs: f32) -> Self::Output {
+    fn mul(mut self, rhs: f64) -> Self::Output {
         self *= rhs;
         self
     }
 }
 
 impl AbsDiffEq for Sphere3D {
-    type Epsilon = f32;
+    type Epsilon = f64;
     fn default_epsilon() -> Self::Epsilon {
-        f32::EPSILON
+        f64::EPSILON
     }
     fn abs_diff_eq(&self, other: &Self, epsilon: Self::Epsilon) -> bool {
-        f32::abs_diff_eq(&self.r, &other.r, epsilon)
-            && f32::abs_diff_eq(&self.θ, &other.θ, epsilon)
-            && f32::abs_diff_eq(&self.φ, &other.φ, epsilon)
+        f64::abs_diff_eq(&self.r, &other.r, epsilon)
+            && f64::abs_diff_eq(&self.θ, &other.θ, epsilon)
+            && f64::abs_diff_eq(&self.φ, &other.φ, epsilon)
     }
 }
 
 impl RelativeEq for Sphere3D {
     fn default_max_relative() -> Self::Epsilon {
-        f32::default_max_relative()
+        f64::default_max_relative()
     }
     fn relative_eq(
         &self,
@@ -188,9 +200,9 @@ impl RelativeEq for Sphere3D {
         epsilon: Self::Epsilon,
         max_relative: Self::Epsilon,
     ) -> bool {
-        f32::relative_eq(&self.r, &other.r, epsilon, max_relative)
-            && f32::relative_eq(&self.θ, &other.θ, epsilon, max_relative)
-            && f32::relative_eq(&self.φ, &other.φ, epsilon, max_relative)
+        f64::relative_eq(&self.r, &other.r, epsilon, max_relative)
+            && f64::relative_eq(&self.θ, &other.θ, epsilon, max_relative)
+            && f64::relative_eq(&self.φ, &other.φ, epsilon, max_relative)
     }
 }
 

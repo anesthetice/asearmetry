@@ -1,19 +1,47 @@
-use crate::audio::{AudioBuffer, AudioBufferSlice};
+use crate::{
+    audio::{AudioBuffer, AudioBufferSlice, DiscreteSignal},
+    math::Hertz,
+};
+use itertools::Itertools;
 
 impl<'data, const C: usize> AudioBufferSlice<'data, C> {
-    pub fn new(channels: [&'data [f32]; C], sampling_rate: Option<u32>) -> Self {
+    pub fn new(channels: [&'data [f32]; C], sampling_rate: Option<Hertz>) -> Self {
         Self {
             channels,
             sampling_rate,
         }
     }
-    pub fn with_sr(mut self, sampling_rate: u32) -> Self {
+    pub fn new_empty() -> Self {
+        Self {
+            channels: std::array::repeat(&[]),
+            sampling_rate: None,
+        }
+    }
+
+    pub fn with_sr(mut self, sampling_rate: Hertz) -> Self {
         self.sampling_rate = Some(sampling_rate);
         self
     }
-    pub fn with_sr_opt(mut self, sampling_rate: Option<u32>) -> Self {
+    pub fn with_sr_opt(mut self, sampling_rate: Option<Hertz>) -> Self {
         self.sampling_rate = sampling_rate;
         self
+    }
+
+    pub fn stack_ref<'a, 'b, const C1: usize, const C2: usize>(
+        a: AudioBufferSlice<'a, C1>,
+        b: AudioBufferSlice<'b, C2>,
+    ) -> Self
+    where
+        'a: 'data, // 'a outlives 'data
+        'b: 'data, // 'b outlives 'data
+    {
+        let sampling_rate = Self::resolve_sampling_rate_pair(a.sr(), b.sr());
+        let channels: [&'data [f32]; C] =
+            itertools::chain!(a.channels.into_iter(), b.channels.into_iter(),)
+                .collect_array()
+                .unwrap();
+
+        Self::new(channels, sampling_rate)
     }
 }
 
@@ -35,8 +63,10 @@ impl<'data, const C: usize> From<[&'data [f32]; C]> for AudioBufferSlice<'data, 
     }
 }
 
-impl<'data, const C: usize> From<([&'data [f32]; C], Option<u32>)> for AudioBufferSlice<'data, C> {
-    fn from(value: ([&'data [f32]; C], Option<u32>)) -> Self {
+impl<'data, const C: usize> From<([&'data [f32]; C], Option<Hertz>)>
+    for AudioBufferSlice<'data, C>
+{
+    fn from(value: ([&'data [f32]; C], Option<Hertz>)) -> Self {
         Self {
             channels: value.0,
             sampling_rate: value.1,
@@ -44,8 +74,8 @@ impl<'data, const C: usize> From<([&'data [f32]; C], Option<u32>)> for AudioBuff
     }
 }
 
-impl<'data, const C: usize> From<([&'data [f32]; C], u32)> for AudioBufferSlice<'data, C> {
-    fn from(value: ([&'data [f32]; C], u32)) -> Self {
+impl<'data, const C: usize> From<([&'data [f32]; C], Hertz)> for AudioBufferSlice<'data, C> {
+    fn from(value: ([&'data [f32]; C], Hertz)) -> Self {
         Self {
             channels: value.0,
             sampling_rate: Some(value.1),

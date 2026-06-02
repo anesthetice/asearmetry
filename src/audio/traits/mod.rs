@@ -1,13 +1,17 @@
 // Modules
 mod asp; // audio signal processing
-mod conv; // convolution
+mod conv_lti; // linear time-invariant convolution
+mod conv_ltv; // linear time-variant convolution
 mod dsp; // discrete signal processing
 mod utils;
 
 // Exports
 pub use asp::AudioSignal;
+pub use conv_lti::_convolve_lti;
+pub use conv_ltv::{_convolve_ltv, LtvFilter};
 pub use dsp::DiscreteSignal;
 pub(crate) use utils::DiscreteSignalUtils;
 
 // Local exports
-use conv::DefinedConvolution;
+use conv_lti::DefinedLtiConvolution;
+use conv_ltv::DefinedLtvConvolution;

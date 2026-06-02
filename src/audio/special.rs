@@ -1,13 +1,17 @@
 // Imports
 use crate::{
-    Hertz, Radians, Seconds,
     audio::{AudioBuffer, AudioBufferSlice, DiscreteSignal},
+    math::{Hertz, Meters, Radians, Seconds},
 };
-use std::f32::consts::TAU;
+use itertools::Itertools;
+use std::f64::consts::TAU;
 use std::{fs::File, path::Path};
 use symphonia::core::{
-    audio::SampleBuffer, codecs::DecoderOptions, errors::Error as SymphError,
-    formats::FormatOptions, io::MediaSourceStream, meta::MetadataOptions, probe::Hint,
+    codecs::audio::AudioDecoderOptions,
+    errors::Error as SymphError,
+    formats::{FormatOptions, TrackType, probe::Hint},
+    io::MediaSourceStream,
+    meta::MetadataOptions,
 };
 
 pub type MonoAudioBuf = AudioBuffer<1>;
@@ -19,7 +23,7 @@ pub type StereoAudioBufSlice<'a> = AudioBufferSlice<'a, 2>;
 // Start of [`MonoAudioBuf`] related code
 //
 impl MonoAudioBuf {
-    pub fn new_mono(samples: Vec<f32>, sampling_rate: Option<u32>) -> Self {
+    pub fn new_mono(samples: Vec<f32>, sampling_rate: Option<Hertz>) -> Self {
         AudioBuffer {
             channels: [samples],
             sampling_rate,
@@ -33,20 +37,22 @@ impl MonoAudioBuf {
 
     pub fn sinusoidal(
         duration: Seconds,
-        sampling_rate: u32,
-        amplitude: f32,
+        sampling_rate: Hertz,
+        amplitude: f64,
         frequency: Hertz,
         phase_offset: Radians,
     ) -> Self {
         assert!(amplitude.abs() <= 1.0);
 
-        let nb_samples = (sampling_rate as f32 * duration).ceil() as usize;
-        let δt = 1.0 / sampling_rate as f32;
+        let nb_samples = (sampling_rate * duration).ceil() as usize;
+        let δt = 1.0 / sampling_rate;
         let ω = TAU * frequency;
 
         AudioBuffer::new_zeros(nb_samples)
             .with_sr(sampling_rate)
-            .apply_enumerate(&mut |(n, _)| amplitude * f32::sin((n as f32) * δt * ω + phase_offset))
+            .apply_enumerate(&mut |(n, _)| {
+                (amplitude * f64::sin((n as f64) * δt * ω + phase_offset)) as f32
+            })
     }
 
     /// Load data from an audio file, works for audio files whose codec is supported
@@ -59,55 +65,68 @@ impl MonoAudioBuf {
 
         // Let Symphonia guess the format.
         let hint = Hint::new();
-        let probed = symphonia::default::get_probe().format(
+        let mut format = symphonia::default::get_probe().probe(
             &hint,
             mss,
-            &FormatOptions::default(),
-            &MetadataOptions::default(),
+            FormatOptions::default(),
+            MetadataOptions::default(),
         )?;
-        let mut format = probed.format;
 
         // Select the first audio track.
         let track = format
-            .default_track()
-            .ok_or_else(|| anyhow::anyhow!("No default track found"))?;
+            .default_track(TrackType::Audio)
+            .ok_or_else(|| anyhow::anyhow!("No default audio track found"))?;
 
         let track_id = track.id;
 
-        let sampling_rate = track
+        let track_audio_codec_params = track
             .codec_params
+            .as_ref()
+            .ok_or_else(|| anyhow::anyhow!("Audio track is missing codec parameters"))?
+            .audio()
+            .unwrap();
+
+        println!("{track_audio_codec_params:?}");
+
+        let track_n_channels = track_audio_codec_params
+            .channels
+            .as_ref()
+            .map(|chas| chas.count())
+            .ok_or_else(|| anyhow::anyhow!("Audio track does not contain any channels"))?;
+
+        let sampling_rate = track_audio_codec_params // safe as `TrackType::Audio` is set above
             .sample_rate
             .ok_or_else(|| anyhow::anyhow!("Unknown sampling rate"))?;
         println!("Sampling rate: {} Hz", sampling_rate);
 
         // Create decoder.
         let mut decoder = symphonia::default::get_codecs()
-            .make(&track.codec_params, &DecoderOptions::default())?;
+            .make_audio_decoder(track_audio_codec_params, &AudioDecoderOptions::default())?;
 
-        let mut samples: Vec<f32> = Vec::new();
+        let mut raw_samples: Vec<f32> = Vec::new();
+        let mut raw_samples_holder: Vec<f32> = Vec::new();
 
         // Decode packets.
         loop {
             let packet = match format.next_packet() {
-                Ok(packet) => packet,
-                Err(SymphError::IoError(io_error)) => {
-                    if io_error.kind() == std::io::ErrorKind::UnexpectedEof {
-                        break;
-                    } else {
-                        anyhow::bail!(io_error);
-                    }
-                }
+                Ok(Some(packet)) => packet,
+                Ok(None) => break, // Reached the end of the stream.
                 Err(err) => {
                     anyhow::bail!(err)
                 }
             };
 
-            if packet.track_id() != track_id {
+            if packet.track_id != track_id {
+                eprintln!("AA: {}", packet.track_id);
                 continue;
             }
 
-            let decoded = match decoder.decode(&packet) {
-                Ok(decoded) => decoded,
+            match decoder.decode(&packet) {
+                Ok(decoded) => {
+                    decoded.copy_to_vec_interleaved(&mut raw_samples_holder);
+                    raw_samples.extend_from_slice(&raw_samples_holder);
+                    raw_samples_holder.clear();
+                }
                 Err(err @ SymphError::IoError(_)) => {
                     eprintln!("Failed to decode a packet due to an IO issue, {err}");
                     continue;
@@ -119,22 +138,30 @@ impl MonoAudioBuf {
                 Err(err) => {
                     anyhow::bail!(err);
                 }
-            };
-
-            let spec = *decoded.spec();
-            let mut buf_f32 = SampleBuffer::<f32>::new(decoded.capacity() as u64, spec);
-            buf_f32.copy_interleaved_ref(decoded);
-
-            let channels = spec.channels.count();
-            let mixed_samples = buf_f32.samples();
-
-            for frame in mixed_samples.chunks_exact(channels) {
-                let sum: f32 = frame.iter().copied().sum();
-                samples.push(sum / channels as f32);
             }
         }
 
-        println!("Decoded {} f32 samples", samples.len());
-        Ok(Self::new_mono(samples, Some(sampling_rate)))
+        println!("Decoded {} f32 samples", raw_samples.len());
+
+        let mono_samples = raw_samples
+            .chunks_exact(track_n_channels)
+            .map(|frame| frame.iter().copied().sum::<f32>() / track_n_channels as f32)
+            .collect_vec();
+
+        Ok(Self::new_mono(mono_samples, Some(sampling_rate as f64)))
+    }
+}
+
+impl StereoAudioBuf {
+    pub fn from_left_right_mono<T1, T2>(left: T1, right: T2) -> Self
+    where
+        T1: DiscreteSignal<1>,
+        T2: DiscreteSignal<1>,
+    {
+        let sampling_rate =
+            Self::resolve_sampling_rate_pair(left.sampling_rate(), right.sampling_rate());
+        let [left] = left.into_owned().channels;
+        let [right] = right.into_owned().channels;
+        Self::new([left, right], sampling_rate)
     }
 }

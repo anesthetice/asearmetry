@@ -1,52 +1,53 @@
-from math import pi
 import numpy as np
-import pyfar as pf # ty: ignore
-import pyarrow as pa # ty: ignore
-import pyarrow.parquet as pq # ty: ignore
+import pyfar as pf
+import pyarrow as pa
+import pyarrow.parquet as pq
 
+from math import pi
+from pathlib import Path
+from itertools import chain
 
 def to_f32_audio(x: np.ndarray) -> np.ndarray:
-    if np.issubdtype(x.dtype, np.integer):
+    if np.issubdtype(x.dtype, np.floating):
+        x = x.astype(np.float32)
+        abs_max = np.abs(x).max().item()
+        if abs_max > 1.0:
+            print(f"Warning, got absmax of {abs_max}, which is greater than 1.0, normalizing all hrirs together")
+            x = x / abs_max
+    elif np.issubdtype(x.dtype, np.integer):
         print("Not a floating-point subtype")
         info = np.iinfo(x.dtype)
         scale = max(abs(info.min), info.max)
         x = x.astype(np.float32) / scale
     else:
-        x = x.astype(np.float32)
-    np.clip(x, -1.0, 1.0, out=x)
+       raise ValueError(f"Input has the unexpected dtype of {x.dtype}")
+
     return x
 
-def main():
-    #fp = "./input/HRIRs_mannequins/KU100051023_1_processed.sofa"
-    #fp = "./input/HRIRs/AKO536081622_1_processed.sofa"
-    fp = "./input/HRIRs/SJN145081522_1_processed.sofa"
-
-    print(f"Processing '{fp}'")
-    sofa_data: tuple[pf.Signal, pf.Coordinates, pf.Coordinates] = pf.io.read_sofa(fp)
+def process_sofa_file(filepath) -> pa.Table:
+    print(f"Processing '{filepath}'")
+    sofa_data: tuple[pf.Signal, pf.Coordinates, pf.Coordinates] = pf.io.read_sofa(filepath)
     hrirs, source_coordinates, receiver_coordinates = sofa_data
 
     hrir_samples = to_f32_audio(hrirs.time)
-
-    assert hrir_samples.dtype == np.float32
-    assert np.max(np.abs(hrir_samples)) <= 1.0
 
     nb_elements = source_coordinates.cshape[0]
     rows = []
 
     for n in range(nb_elements):
         rows.append({
-            "src_radius": np.float32(source_coordinates.radius[n]),
-            "src_azimuth": np.float32(source_coordinates.azimuth[n]),
-            "src_zenith": np.float32(pi - source_coordinates.colatitude[n]),
+            "src_radius": np.float64(source_coordinates.radius[n]),
+            "src_azimuth": np.float64(source_coordinates.azimuth[n]),
+            "src_zenith": np.float64(pi - source_coordinates.colatitude[n]),
             "hrir_left": hrir_samples[n, 0, :],
             "hrir_right": hrir_samples[n, 1, :],
         })
 
     schema = pa.schema(
         [
-            ("src_radius", pa.float32()),
-            ("src_azimuth", pa.float32()),
-            ("src_zenith", pa.float32()),
+            ("src_radius", pa.float64()),
+            ("src_azimuth", pa.float64()),
+            ("src_zenith", pa.float64()),
             ("hrir_left", pa.list_(pa.float32())),
             ("hrir_right", pa.list_(pa.float32())),
         ],
@@ -57,7 +58,7 @@ def main():
                 b"David Lou Alon, Sebastia V. Amengual Gari, Paul Calamia",
             "LINK": b"https://facebookresearch.github.io/SS2_HRTF/",
             "LICENSE": b"CC-BY-4.0",
-            "sampling_rate": str(int(hrirs.sampling_rate)).encode(),
+            "sampling_rate": str(hrirs.sampling_rate).encode(),
             "left_ear_position_cartesian":
                 f"{receiver_coordinates.x[0, 0]}, "
                 f"{receiver_coordinates.y[0, 0]}, "
@@ -69,14 +70,36 @@ def main():
         },
     )
 
-    table = pa.Table.from_pylist(rows, schema=schema)
+    return pa.Table.from_pylist(rows, schema=schema)
 
-    pq.write_table(
-        table,
-        "output/hrtf.parquet",
-        compression="zstd",
-        compression_level=9,
-    )
+
+def main():
+    output_dirpath = Path("output/")
+
+    for input_dirpath, _, input_filenames in chain(Path("input/HRIRs/").walk(), Path("input/HRIRs_mannequins/").walk()):
+        for input_filename in input_filenames:
+            assert input_filename.endswith(".sofa")
+            input_filepath =  input_dirpath.joinpath(input_filename)
+
+            table = process_sofa_file(input_filepath)
+
+            output_filename = input_filename[:-5] + ".asear.hrtf.parquet"
+            output_filepath = output_dirpath.joinpath(output_filename)
+            print(f"Saving to {output_filepath}")
+            pq.write_table(
+                table,
+                output_filepath,
+                compression="zstd",
+                compression_level=16,
+            )
+
+            return
+
+
+
+
+
+
 
 
 if __name__ == "__main__":

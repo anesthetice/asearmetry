@@ -7,7 +7,7 @@
 //!
 //! To be fair I'm not sure if this is worth the added cost in bad ergonomics.
 //!
-//! Maybe I could use a macro to generate all of this instead, but probably not worth it at this point.
+//! Maybe I could use a procedural macro to generate all of this instead, but probably not worth it currently.
 
 use crate::audio::{AudioBuffer, AudioBufferSlice, DiscreteSignal};
 
@@ -31,18 +31,37 @@ impl<const C: usize> AudioBuffer<C> {
     pub fn map_cha<'s, T>(&'s self, mut f: impl FnMut(&'s Vec<f32>) -> T) -> [T; C] {
         std::array::from_fn(|c| f(self.cha_uc(c)))
     }
+    pub fn map_cha_enumerate<'s, T>(&'s self, mut f: impl FnMut(usize, &'s [f32]) -> T) -> [T; C] {
+        std::array::from_fn(|c| f(c, self.cha_uc(c)))
+    }
     pub fn slice<I>(&self, index: I) -> AudioBufferSlice<'_, C>
     where
         I: std::slice::SliceIndex<[f32], Output = [f32]> + Clone,
     {
         AudioBufferSlice::new(self.map_cha(|cha| &cha[index.clone()]), self.sampling_rate)
     }
-    pub fn slice_cha<'s, const D: usize, I>(&'s self, index: I) -> AudioBufferSlice<'s, D>
+    pub fn slice_by_time(&self, start: f64, end: f64) -> AudioBufferSlice<'_, C> {
+        let sr = self
+            .sampling_rate()
+            .expect("Sampling rate must be defined to use this operation.");
+        let start_idx = (sr * start).round() as usize;
+        let end_idx = (sr * end).round() as usize + 1;
+        assert!(start_idx < end_idx);
+        self.slice(start_idx..end_idx)
+    }
+    pub fn slice_cha<'s, const D: usize, I>(&'s self, slice: I) -> AudioBufferSlice<'s, D>
     where
-        I: std::slice::SliceIndex<[&'s [f32]], Output = [&'s [f32]]> + Clone,
+        I: std::slice::SliceIndex<[&'s [f32]], Output = [&'s [f32]]>,
     {
-        let channels: [&'s [f32]; D] = self.chas().map(|v| v.as_slice())[index].try_into().unwrap();
+        let channels: [&'s [f32]; D] = self.chas().map(|v| v.as_slice())[slice].try_into().unwrap();
         AudioBufferSlice::new(channels, self.sampling_rate)
+    }
+    pub fn index_cha<'s, I>(&'s self, index: I) -> AudioBufferSlice<'s, 1>
+    where
+        I: std::slice::SliceIndex<[&'s [f32]], Output = &'s [f32]>,
+    {
+        let channel: &'s [f32] = self.chas().map(|v| v.as_slice())[index];
+        AudioBufferSlice::new([channel], self.sampling_rate)
     }
     pub fn first_n(&self, n: usize) -> AudioBufferSlice<'_, C> {
         self.slice(0..n)
@@ -113,18 +132,37 @@ impl<'data, const C: usize> AudioBufferSlice<'data, C> {
     pub fn map_cha<T>(&self, mut f: impl FnMut(&'data [f32]) -> T) -> [T; C] {
         std::array::from_fn(|c| f(self.cha_uc(c)))
     }
+    pub fn map_cha_enumerate<T>(&self, mut f: impl FnMut(usize, &'data [f32]) -> T) -> [T; C] {
+        std::array::from_fn(|c| f(c, self.cha_uc(c)))
+    }
     pub fn slice<I>(&self, index: I) -> AudioBufferSlice<'data, C>
     where
         I: std::slice::SliceIndex<[f32], Output = [f32]> + Clone,
     {
         AudioBufferSlice::new(self.map_cha(|cha| &cha[index.clone()]), self.sampling_rate)
     }
-    pub fn slice_cha<const D: usize, I>(&self, index: I) -> AudioBufferSlice<'data, D>
+    pub fn slice_by_time(&self, start: f64, end: f64) -> AudioBufferSlice<'data, C> {
+        let sr = self
+            .sampling_rate()
+            .expect("Sampling rate must be defined to use this operation.");
+        let start_idx = (sr * start).round() as usize;
+        let end_idx = (sr * end).round() as usize + 1;
+        assert!(start_idx < end_idx);
+        self.slice(start_idx..end_idx)
+    }
+    pub fn slice_cha<const D: usize, I>(&self, slice: I) -> AudioBufferSlice<'data, D>
     where
-        I: std::slice::SliceIndex<[&'data [f32]], Output = [&'data [f32]]> + Clone,
+        I: std::slice::SliceIndex<[&'data [f32]], Output = [&'data [f32]]>,
     {
-        let channels: [&'data [f32]; D] = self.channels[index].try_into().unwrap();
+        let channels: [&'data [f32]; D] = self.channels[slice].try_into().unwrap();
         AudioBufferSlice::new(channels, self.sampling_rate)
+    }
+    pub fn index_cha<I>(&self, index: I) -> AudioBufferSlice<'data, 1>
+    where
+        I: std::slice::SliceIndex<[&'data [f32]], Output = &'data [f32]>,
+    {
+        let channel: &'data [f32] = self.channels[index];
+        AudioBufferSlice::new([channel], self.sampling_rate)
     }
     pub fn first_n(&self, n: usize) -> AudioBufferSlice<'data, C> {
         self.slice(0..n)

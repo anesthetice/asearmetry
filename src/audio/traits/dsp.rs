@@ -1,7 +1,8 @@
 // Imports
+use super::{DefinedLtiConvolution, DefinedLtvConvolution};
 use crate::{
-    Seconds,
-    audio::{AudioBuffer, AudioBufferSlice, DiscreteSignalUtils},
+    audio::{AudioBuffer, AudioBufferSlice, DiscreteSignalUtils, LtvFilter},
+    math::{Hertz, Seconds},
 };
 use itertools::Itertools;
 use std::f32::consts::PI;
@@ -10,7 +11,7 @@ use std::f32::consts::PI;
 pub trait DiscreteSignal<const C: usize>: Clone + DiscreteSignalUtils<C> {
     fn is_empty(&self) -> bool;
 
-    fn sampling_rate(&self) -> Option<u32>;
+    fn sampling_rate(&self) -> Option<Hertz>;
 
     /// Clones data if `self` is a [`AudioBufferSlice`], returns `self` if already a [`AudioBuffer`].
     fn into_owned(self) -> AudioBuffer<C>;
@@ -29,30 +30,47 @@ pub trait DiscreteSignal<const C: usize>: Clone + DiscreteSignalUtils<C> {
         self.lens().into_iter().max().unwrap_or(0)
     }
 
-    #[inline(always)]
-    fn sampling_rate_f32(&self) -> Option<f32> {
-        self.sampling_rate().map(|sr| sr as f32)
+    /// Alias for [`Self::sampling_rate`].
+    fn sr(&self) -> Option<Hertz> {
+        self.sampling_rate()
     }
 
-    #[inline(always)]
-    fn resolve_sampling_rate_pair(left: Option<u32>, right: Option<u32>) -> Option<u32> {
+    fn sampling_rate_f32(&self) -> Option<f32> {
+        self.sr().map(|sr| sr as f32)
+    }
+
+    fn sampling_rate_usize(&self) -> Option<usize> {
+        self.sr().map(|sr| sr.round() as usize)
+    }
+
+    fn sampling_rate_u32(&self) -> Option<u32> {
+        self.sr().map(|sr| sr.round() as u32)
+    }
+
+    /// Note: will only panic if sampling rates are incoherent when debug assertions are enabled.
+    fn resolve_sampling_rate_pair(sr_1: Option<Hertz>, sr_2: Option<Hertz>) -> Option<Hertz> {
         debug_assert!(
-            left.zip(right).is_none_or(|(l, r)| l == r),
+            sr_1.zip(sr_2)
+                .is_none_or(|(a, b)| approx::abs_diff_eq!(a, b, epsilon = 0.1)),
             "Sampling rates mismatch"
         );
-        left.or(right)
+        sr_1.or(sr_2)
     }
 
-    #[inline(always)]
-    fn resolve_sampling_rate_many<I>(input: I) -> Option<u32>
+    /// Note: will only panic if sampling rates are incoherent when debug assertions are enabled.
+    fn resolve_sampling_rate_many<I>(input: I) -> Option<Hertz>
     where
-        I: IntoIterator<Item = Option<u32>>,
+        I: IntoIterator<Item = Option<Hertz>>,
     {
         let mut iter = input.into_iter();
         let sampling_rate = iter.find_map(|e| e);
 
         debug_assert!(
-            sampling_rate.is_none_or(|sr| iter.flatten().all(|other_sr| sr == other_sr)),
+            sampling_rate.is_none_or(|sr_1| iter.flatten().all(|sr_2| approx::abs_diff_eq!(
+                sr_1,
+                sr_2,
+                epsilon = 0.1
+            ))),
             "Sampling rates mismatch"
         );
 
@@ -60,10 +78,10 @@ pub trait DiscreteSignal<const C: usize>: Clone + DiscreteSignalUtils<C> {
     }
 
     fn seconds_to_index(&self, s: Seconds) -> usize {
-        let Some(sampling_rate) = self.sampling_rate_f32() else {
+        let Some(sampling_rate) = self.sr() else {
             panic!("Sampling rate not defined");
         };
-        (sampling_rate * s).floor() as usize
+        (sampling_rate * s).round() as usize
     }
 
     fn first_n_owned(self, n: usize) -> AudioBuffer<C> {
@@ -96,6 +114,22 @@ pub trait DiscreteSignal<const C: usize>: Clone + DiscreteSignalUtils<C> {
             v.truncate(t_len);
         });
         out
+    }
+
+    fn stack_owned<const C1: usize, const C2: usize, T1, T2>(a: T1, b: T2) -> AudioBuffer<C>
+    where
+        T1: DiscreteSignal<C1>,
+        T2: DiscreteSignal<C2>,
+    {
+        let sampling_rate = Self::resolve_sampling_rate_pair(a.sr(), b.sr());
+        let channels = itertools::chain!(
+            a.into_owned().channels.into_iter(),
+            b.into_owned().channels.into_iter(),
+        )
+        .collect_array::<C>()
+        .unwrap();
+
+        AudioBuffer::new(channels, sampling_rate)
     }
 
     fn merge<T1, T2>(a: T1, b: T2) -> AudioBuffer<C>
@@ -324,22 +358,23 @@ pub trait DiscreteSignal<const C: usize>: Clone + DiscreteSignalUtils<C> {
 
     fn pad_right(self, by: usize) -> AudioBuffer<C> {
         let mut buf = self.into_owned();
-        buf.iter_cha_mut().for_each(|buf| buf.extend(vec![0.0; by]));
+        buf.iter_cha_mut()
+            .for_each(|buf| buf.resize(buf.len() + by, 0.0));
         buf
     }
 
     fn pad_right_to_len(self, len: usize) -> AudioBuffer<C> {
         let mut buf = self.into_owned();
-        buf.iter_cha_mut().for_each(|buf| {
-            let by = len.saturating_sub(buf.len());
-            buf.extend(vec![0.0; by])
-        });
+        buf.iter_cha_mut()
+            .filter(|buf| buf.len() < len)
+            .for_each(|buf| buf.resize(len, 0.0));
         buf
     }
 
     fn pad_right_with(self, by: usize, val: f32) -> AudioBuffer<C> {
         let mut buf = self.into_owned();
-        buf.iter_cha_mut().for_each(|buf| buf.extend(vec![val; by]));
+        buf.iter_cha_mut()
+            .for_each(|buf| buf.resize(buf.len() + by, val));
         buf
     }
 
@@ -347,18 +382,19 @@ pub trait DiscreteSignal<const C: usize>: Clone + DiscreteSignalUtils<C> {
         let mut buf = self.into_owned();
         buf.iter_cha_mut().for_each(|buf| {
             let val = *buf.last().unwrap_or(&0.0);
-            buf.extend(vec![val; by])
+            buf.resize(buf.len() + by, val)
         });
         buf
     }
 
     fn pad_right_with_last_to_len(self, len: usize) -> AudioBuffer<C> {
         let mut buf = self.into_owned();
-        buf.iter_cha_mut().for_each(|buf| {
-            let by = len.saturating_sub(buf.len());
-            let val = *buf.last().unwrap_or(&0.0);
-            buf.extend(vec![val; by])
-        });
+        buf.iter_cha_mut()
+            .filter(|buf| buf.len() < len)
+            .for_each(|buf| {
+                let val = *buf.last().unwrap_or(&0.0);
+                buf.resize(len, val);
+            });
         buf
     }
 
@@ -396,12 +432,12 @@ pub trait DiscreteSignal<const C: usize>: Clone + DiscreteSignalUtils<C> {
         )
     }
 
-    fn convolve<T, const C2: usize>(
+    fn convolve<T, const C2: usize, const C3: usize>(
         &self,
         h: T,
-    ) -> <Self as super::DefinedConvolution<C, C2>>::ConvolutionOutput
+    ) -> <Self as DefinedLtiConvolution<C, C2, C3>>::Output
     where
-        Self: super::DefinedConvolution<C, C2>,
+        Self: DefinedLtiConvolution<C, C2, C3>,
         T: DiscreteSignal<C2>,
     {
         self.convolve_with(h)
@@ -409,9 +445,9 @@ pub trait DiscreteSignal<const C: usize>: Clone + DiscreteSignalUtils<C> {
 
     /// Similar to using `numpy.convolve(a, v, mode='same')`, we keep the output "aligned" with
     /// our input; left-biased in the case where the filter `h` has an even length.
-    fn convolve_then_crop<T, const C2: usize, const C_OUT: usize>(&self, h: T) -> AudioBuffer<C_OUT>
+    fn convolve_then_crop<T, const C2: usize, const C3: usize>(&self, h: T) -> AudioBuffer<C3>
     where
-        Self: super::DefinedConvolution<C, C2, ConvolutionOutput = AudioBuffer<C_OUT>>,
+        Self: DefinedLtiConvolution<C, C2, C3>,
         T: DiscreteSignal<C2>,
     {
         let filter_size = h.len();
@@ -427,6 +463,15 @@ pub trait DiscreteSignal<const C: usize>: Clone + DiscreteSignalUtils<C> {
             eprintln!("Warning, filter length is even");
             y.skip_first_n_owned(M - 1).skip_last_n_owned(M)
         }
+    }
+
+    fn convolve_ltv<S, H, F1, F2>(&self, h: LtvFilter<S, H, F1, F2>) -> AudioBuffer<1>
+    where
+        Self: DefinedLtvConvolution,
+        F1: Fn(usize, &mut S, &mut H),
+        F2: for<'a> Fn(&'a H) -> &'a [f32],
+    {
+        self.convolve_ltv_with(h)
     }
 
     fn interleaved_samples_f32(&self) -> Vec<f32> {
@@ -481,7 +526,7 @@ impl<const C: usize> DiscreteSignal<C> for AudioBuffer<C> {
     fn is_empty(&self) -> bool {
         self.channels.first().map(Vec::is_empty).unwrap_or(true)
     }
-    fn sampling_rate(&self) -> Option<u32> {
+    fn sampling_rate(&self) -> Option<Hertz> {
         self.sampling_rate
     }
     fn into_owned(self) -> AudioBuffer<C> {
@@ -496,7 +541,7 @@ impl<const C: usize> DiscreteSignal<C> for AudioBufferSlice<'_, C> {
             .map(|cha| cha.is_empty())
             .unwrap_or(true)
     }
-    fn sampling_rate(&self) -> Option<u32> {
+    fn sampling_rate(&self) -> Option<Hertz> {
         self.sampling_rate
     }
     fn into_owned(self) -> AudioBuffer<C> {
@@ -511,7 +556,7 @@ where
     fn is_empty(&self) -> bool {
         (*self).is_empty()
     }
-    fn sampling_rate(&self) -> Option<u32> {
+    fn sampling_rate(&self) -> Option<Hertz> {
         (*self).sampling_rate()
     }
     fn into_owned(self) -> AudioBuffer<C> {

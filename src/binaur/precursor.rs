@@ -1,9 +1,9 @@
 // Imports
 use crate::{
-    Meters,
     audio::{AudioSignal, DiscreteSignal, StereoAudioBuf},
-    brp::{Binauralizer, HrirProjection},
+    binaur::{Binauralizer, HrirProjection},
     coordinates::{Cart3D, Shell2D},
+    math::{Hertz, Meters},
 };
 use anyhow::anyhow;
 use itertools::Itertools;
@@ -16,7 +16,7 @@ pub struct BinauralizerPrecursor {
     pub hrir_pos_vec: Vec<Shell2D>,
     pub hrir_radius: Meters,
     pub hrir_size: usize,
-    pub hrir_sampling_rate: u32,
+    pub hrir_sampling_rate: Hertz,
     pub left_ear_pos: Cart3D,
     pub right_ear_pos: Cart3D,
 }
@@ -37,14 +37,14 @@ impl BinauralizerPrecursor {
         let hrir_sampling_rate = key_value_metadata
             .get("sampling_rate")
             .ok_or_else(|| anyhow!("Missing `sampling_rate` key-value pair"))?
-            .parse::<u32>()?;
+            .parse::<Hertz>()?;
 
         let left_ear_pos: Cart3D = key_value_metadata
             .get("left_ear_position_cartesian")
             .ok_or_else(|| anyhow!("Missing `left_ear_position_cartesian` key-value pair"))?
             .split(",")
-            .map(|s| s.trim().parse::<f32>().unwrap())
-            .collect_tuple::<(f32, f32, f32)>()
+            .map(|s| s.trim().parse::<f64>().unwrap())
+            .collect_tuple::<(f64, f64, f64)>()
             .ok_or_else(|| {
                 anyhow!(
                     "Invalid `left_ear_position_cartesian` value, could not extract (f32; 3) tuple"
@@ -56,8 +56,8 @@ impl BinauralizerPrecursor {
             .get("right_ear_position_cartesian")
             .ok_or_else(|| anyhow!("Missing `right_ear_position_cartesian` key-value pair"))?
             .split(",")
-            .map(|s| s.trim().parse::<f32>().unwrap())
-            .collect_tuple::<(f32, f32, f32)>()
+            .map(|s| s.trim().parse::<f64>().unwrap())
+            .collect_tuple::<(f64, f64, f64)>()
             .ok_or_else(|| {
                 anyhow!(
                     "Invalid `left_ear_position_cartesian` value, could not extract (f32; 3) tuple"
@@ -72,8 +72,8 @@ impl BinauralizerPrecursor {
 
         let df = reader.finish().unwrap();
 
-        let process_float_col = |name: &str| -> anyhow::Result<Vec<f32>> {
-            let col = df.column(name)?.f32()?;
+        let process_float_col = |name: &str| -> anyhow::Result<Vec<f64>> {
+            let col = df.column(name)?.f64()?;
             Ok(col.into_no_null_iter().collect_vec())
         };
 
@@ -91,11 +91,17 @@ impl BinauralizerPrecursor {
         let hrir_left_vec = process_list_float_col("hrir_left")?;
         let hrir_right_vec = process_list_float_col("hrir_right")?;
 
-        assert!(
-            src_radius_vec.iter().all_equal(),
-            "Currently only handles cases where the radius of the source is constant."
-        );
-        let hrir_radius = *src_radius_vec.first().unwrap();
+        {
+            let comparator = src_radius_vec.first().unwrap();
+            assert!(
+                src_radius_vec
+                    .iter()
+                    .all(|r| approx::abs_diff_eq!(r, comparator, epsilon = 1E-2)),
+                "Currently only handles cases where the radius of the source is constant."
+            );
+        }
+
+        let hrir_radius = src_radius_vec.first().unwrap().round();
 
         assert!(hrir_left_vec.iter().map(Vec::len).all_equal());
         assert!(hrir_right_vec.iter().map(Vec::len).all_equal());
@@ -129,19 +135,75 @@ impl BinauralizerPrecursor {
 
     pub fn into_binauralizer(mut self) -> Binauralizer {
         // The first important step is to remove the delay in the HRIRs
+        self.hrir_vec.iter_mut().for_each(|hrir| {
+            let hrir_spike_smooth = hrir
+                .clone()
+                .abs()
+                .apply_gaussian_filter(10, 0.05)
+                .normalize_to(hrir.get_abs_max());
+
+            const CENTER_INDEX: usize = 30;
+
+            // We align both peaks to the currently arbitrary position of 30
+            let mut adjust_peak = |c: usize| {
+                let peak_idx = hrir_spike_smooth.index_cha(c).get_abs_max_index();
+
+                #[allow(non_snake_case)]
+                let Δ_abs = peak_idx.abs_diff(CENTER_INDEX);
+
+                // peak is to the right, we remove Δ_abs elements from the start to shift it to the left
+                if peak_idx > CENTER_INDEX {
+                    hrir.cha_mut_uc(c).drain(0..Δ_abs);
+                    hrir.cha_mut_uc(c).resize(self.hrir_size, 0.0);
+                }
+                // peak is to the left, we add Δ_abs elements to the start to shift it to the right
+                else if peak_idx < CENTER_INDEX {
+                    let mut vec = vec![0.0; Δ_abs];
+                    vec.extend_from_slice(hrir.cha_uc(c));
+                    vec.resize(self.hrir_size, 0.0);
+                    *hrir.cha_mut_uc(c) = vec;
+                }
+
+                // TODO: maybe apply window function here as well to avoid any discontinuities?
+            };
+
+            adjust_peak(0);
+            adjust_peak(1);
+        });
+
+        let hrir_rtree = rstar::RTree::bulk_load(
+            self.hrir_vec
+                .into_iter()
+                .zip(self.hrir_pos_vec)
+                .map(|(hrir, pos)| HrirProjection::new(pos, hrir))
+                .collect(),
+        );
+
+        Binauralizer {
+            hrir_rtree,
+            hrir_radius: self.hrir_radius,
+            hrir_size: self.hrir_size,
+            hrir_sampling_rate: self.hrir_sampling_rate,
+            left_ear_pos: self.left_ear_pos,
+            right_ear_pos: self.right_ear_pos,
+        }
+    }
+
+    pub fn into_binauralizer_old(mut self) -> Binauralizer {
+        // The first important step is to remove the delay in the HRIRs
         let mut max_len: usize = 0;
         self.hrir_vec.iter_mut().for_each(|hrir| {
             let hrir_spike_smooth = hrir
                 .clone()
                 .abs()
                 .apply_median_filter(4)
-                .apply_gaussian_filter(4, 0.33)
+                //.apply_gaussian_filter(4, 0.33)
                 .normalize_to(hrir.get_abs_max());
 
             let find_start = |c: usize| {
-                let (μ, σ) = {
+                let (μ, σ): (f32, f32) = {
                     let slice = &hrir_spike_smooth.cha_uc(c)[0..10];
-                    (crate::stat::mean(slice), crate::stat::std(slice, 1))
+                    (crate::math::mean(slice), crate::math::std(slice, 1))
                 };
                 let threshold = μ + 10.0 * σ;
                 hrir_spike_smooth

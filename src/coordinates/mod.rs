@@ -11,7 +11,7 @@ pub use spherical::{Sphere3D, clamp_azimuth, clamp_zenith};
 #[cfg(test)]
 mod test {
     use super::*;
-    use std::f32::consts::PI;
+    use std::f64::consts::PI;
 
     #[test]
     #[rustfmt::skip]
@@ -21,7 +21,7 @@ mod test {
         let q3_above_cart = Cart3D::new(-2.0, -2.0, 1.0);
         let q4_above_cart = Cart3D::new(2.0, -2.0, 1.0);
 
-        let zenith = (PI / 2.0) + f32::asin(1.0 / 3.0);
+        let zenith = (PI / 2.0) + f64::asin(1.0 / 3.0);
 
         let q1_above_sphere = Sphere3D::new(3.0, PI / 4.0, zenith);
         let q2_above_sphere = Sphere3D::new(3.0, 3.0 * PI / 4.0, zenith);
@@ -49,7 +49,7 @@ mod test {
         let q3_below_cart = Cart3D::new(-2.0, -2.0, -1.0);
         let q4_below_cart = Cart3D::new(2.0, -2.0, -1.0);
 
-        let zenith = (PI / 2.0) - f32::asin(1.0 / 3.0);
+        let zenith = (PI / 2.0) - f64::asin(1.0 / 3.0);
 
         let q1_below_sphere = Sphere3D::new(3.0, PI / 4.0, zenith);
         let q2_below_sphere = Sphere3D::new(3.0, 3.0 * PI / 4.0, zenith);

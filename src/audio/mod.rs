@@ -1,3 +1,6 @@
+// Imports
+use crate::math::Hertz;
+
 // Modules
 mod borrowed;
 mod common;
@@ -9,7 +12,7 @@ mod traits;
 // Exports
 pub use special::{MonoAudioBuf, MonoAudioBufSlice, StereoAudioBuf, StereoAudioBufSlice};
 pub(crate) use traits::DiscreteSignalUtils;
-pub use traits::{AudioSignal, DiscreteSignal};
+pub use traits::{_convolve_lti, _convolve_ltv, AudioSignal, DiscreteSignal, LtvFilter};
 
 /// Represents a multichannel audio signal.
 ///
@@ -24,7 +27,7 @@ pub use traits::{AudioSignal, DiscreteSignal};
 pub struct AudioBuffer<const C: usize> {
     pub(crate) channels: [Vec<f32>; C],
     /// Sampling rate in Hertz.
-    pub(crate) sampling_rate: Option<u32>,
+    pub(crate) sampling_rate: Option<Hertz>,
 }
 
 /// A borrowed, channel-major view into sliced audio sample data.
@@ -33,5 +36,5 @@ pub struct AudioBuffer<const C: usize> {
 pub struct AudioBufferSlice<'data, const C: usize> {
     pub(crate) channels: [&'data [f32]; C],
     /// Sampling rate in Hertz.
-    pub(crate) sampling_rate: Option<u32>,
+    pub(crate) sampling_rate: Option<Hertz>,
 }

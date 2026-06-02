@@ -1,41 +1,27 @@
 // Imports
 use crate::{
-    Seconds,
-    audio::{AudioBuffer, AudioBufferSlice, DiscreteSignal, MonoAudioBuf},
+    audio::{AudioBuffer, DiscreteSignal, MonoAudioBuf},
+    math::{Seconds, sinc},
 };
 use itertools::Itertools;
 use std::f32::consts::PI;
 
-fn sinc(x: f32) -> f32 {
-    if x != 0.0 {
-        (x * PI).sin() / (x * PI)
-    } else {
-        1.0
-    }
-}
-
 pub trait AudioSignal<const C: usize>: DiscreteSignal<C> {
     fn duration(&self) -> Option<Seconds> {
-        self.sampling_rate_f32().map(|sr| self.len() as f32 / sr)
+        self.sampling_rate().map(|sr| self.len() as f64 / sr)
     }
 
     fn delay(&self, by: Seconds) -> AudioBuffer<C> {
-        let sampling_rate = self
-            .sampling_rate_f32()
-            .expect("Sampling rate is not defined");
+        let sampling_rate = self.sampling_rate().expect("Sampling rate is not defined");
         self.pad_left((by * sampling_rate).ceil() as usize)
     }
 
     /// The parameter M is such that the filter's number of taps (i.e. its length) is equal to 2M+1.
     /// This is to ensure that the filter's length is odd.
     #[allow(non_snake_case)]
-    fn apply_low_pass_filter(
-        &self,
-        cutoff_freq: f32,
-        M: usize,
-    ) -> <Self as super::DefinedConvolution<C, 1>>::ConvolutionOutput
+    fn apply_low_pass_filter(&self, cutoff_freq: f32, M: usize) -> AudioBuffer<C>
     where
-        Self: super::DefinedConvolution<C, 1, ConvolutionOutput = AudioBuffer<C>>,
+        Self: super::DefinedLtiConvolution<C, 1, C>,
     {
         let num_taps = (M * 2) + 1;
         let f_norm = cutoff_freq
@@ -71,6 +57,7 @@ pub trait AudioSignal<const C: usize>: DiscreteSignal<C> {
     /// This is to ensure that the filter's length is odd.
     #[allow(non_snake_case)]
     fn apply_median_filter(&self, M: usize) -> AudioBuffer<C> {
+        assert!(M > 0);
         self.apply_centered_window(M, |x| {
             let mut vec = x.to_vec();
             vec.sort_unstable_by(f32::total_cmp);
@@ -85,19 +72,17 @@ pub trait AudioSignal<const C: usize>: DiscreteSignal<C> {
     /// The parameter M is such that the filter's number of taps (i.e. its length) is equal to 2M+1.
     /// This is to ensure that the filter's length is odd.
     #[allow(non_snake_case)]
-    fn apply_gaussian_filter(
-        &self,
-        M: usize,
-        a: f32,
-    ) -> <Self as super::DefinedConvolution<C, 1>>::ConvolutionOutput
+    fn apply_gaussian_filter(&self, M: usize, a: f32) -> AudioBuffer<C>
     where
-        Self: super::DefinedConvolution<C, 1, ConvolutionOutput = AudioBuffer<C>>,
+        Self: super::DefinedLtiConvolution<C, 1, C>,
     {
+        assert!(M > 0);
+        let M = M as i64;
         let num_taps = (M * 2) + 1;
         let filter: MonoAudioBuf = (0..num_taps)
             .map(|n| {
                 // We must offset the center of the filter by M to the right as we are in the discrete case, h[n<0]=0
-                let x = n as f32 - M as f32;
+                let x = (n - M) as f32;
                 let ideal = f32::sqrt(a / PI) * f32::exp(-a * x.powi(2));
 
                 // Once again we use the Hann window function to avoid the "Gibbs Phenomenon".
@@ -123,7 +108,7 @@ pub trait AudioSignal<const C: usize>: DiscreteSignal<C> {
 
         let spec = hound::WavSpec {
             channels: C as u16,
-            sample_rate: sampling_rate,
+            sample_rate: sampling_rate.round() as u32,
             bits_per_sample: 16,
             sample_format: hound::SampleFormat::Int,
         };
@@ -147,10 +132,12 @@ pub trait AudioSignal<const C: usize>: DiscreteSignal<C> {
             .create(true)
             .open(filepath)?;
 
-        self.write_to(&mut file)
+        self.write_to(&mut file)?;
+
+        file.sync_all()?;
+
+        Ok(())
     }
 }
 
-impl<const C: usize> AudioSignal<C> for AudioBuffer<C> {}
-impl<const C: usize> AudioSignal<C> for AudioBufferSlice<'_, C> {}
-impl<const C: usize, T> AudioSignal<C> for &T where T: AudioSignal<C> {}
+impl<const C: usize, T> AudioSignal<C> for T where T: DiscreteSignal<C> {}

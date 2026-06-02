@@ -1,78 +1,59 @@
 // Imports
 use crate::audio::{AudioBuffer, DiscreteSignal};
 
-pub trait DefinedConvolution<const C1: usize, const C2: usize> {
-    type ConvolutionOutput;
-    fn convolve_with<T2>(&self, other: T2) -> Self::ConvolutionOutput
+pub trait DefinedLtiConvolution<const C1: usize, const C2: usize, const C3: usize> {
+    type Output: DiscreteSignal<C3>;
+    fn convolve_with<T2>(&self, other: T2) -> Self::Output
     where
         T2: DiscreteSignal<C2>;
 }
 
-impl<T1> DefinedConvolution<1, 1> for T1
+impl<const C: usize, T1> DefinedLtiConvolution<C, C, C> for T1
 where
-    T1: DiscreteSignal<1>,
+    T1: DiscreteSignal<C>,
 {
-    type ConvolutionOutput = AudioBuffer<1>;
-    fn convolve_with<T2>(&self, other: T2) -> Self::ConvolutionOutput
+    type Output = AudioBuffer<C>;
+    fn convolve_with<T2>(&self, other: T2) -> Self::Output
     where
-        T2: DiscreteSignal<1>,
+        T2: DiscreteSignal<C>,
     {
         AudioBuffer::new(
-            [_convolve(self._cha(0), other._cha(0))],
+            self._map_cha_enumerate(|c, samples| _convolve_lti(samples, other._cha(c))),
             Self::resolve_sampling_rate_pair(self.sampling_rate(), other.sampling_rate()),
         )
     }
 }
 
-impl<T1> DefinedConvolution<1, 2> for T1
+impl<T1> DefinedLtiConvolution<1, 2, 2> for T1
 where
     T1: DiscreteSignal<1>,
 {
-    type ConvolutionOutput = AudioBuffer<2>;
-    fn convolve_with<T2>(&self, other: T2) -> Self::ConvolutionOutput
+    type Output = AudioBuffer<2>;
+    fn convolve_with<T2>(&self, other: T2) -> Self::Output
     where
         T2: DiscreteSignal<2>,
     {
         AudioBuffer::new(
-            std::array::from_fn(|c| _convolve(self._cha(0), other._cha(c))),
+            std::array::from_fn(|c| _convolve_lti(self._cha(0), other._cha(c))),
             Self::resolve_sampling_rate_pair(self.sampling_rate(), other.sampling_rate()),
         )
     }
 }
 
-impl<T1> DefinedConvolution<2, 1> for T1
+impl<T1> DefinedLtiConvolution<2, 1, 2> for T1
 where
     T1: DiscreteSignal<2>,
 {
-    type ConvolutionOutput = AudioBuffer<2>;
-    fn convolve_with<T2>(&self, other: T2) -> Self::ConvolutionOutput
+    type Output = AudioBuffer<2>;
+    fn convolve_with<T2>(&self, other: T2) -> Self::Output
     where
         T2: DiscreteSignal<1>,
     {
-        AudioBuffer::new(
-            std::array::from_fn(|c| _convolve(self._cha(c), other._cha(0))),
-            Self::resolve_sampling_rate_pair(self.sampling_rate(), other.sampling_rate()),
-        )
+        other.convolve_with(self)
     }
 }
 
-impl<T1> DefinedConvolution<2, 2> for T1
-where
-    T1: DiscreteSignal<2>,
-{
-    type ConvolutionOutput = AudioBuffer<2>;
-    fn convolve_with<T2>(&self, other: T2) -> Self::ConvolutionOutput
-    where
-        T2: DiscreteSignal<2>,
-    {
-        AudioBuffer::new(
-            std::array::from_fn(|c| _convolve(self._cha(c), other._cha(c))),
-            Self::resolve_sampling_rate_pair(self.sampling_rate(), other.sampling_rate()),
-        )
-    }
-}
-
-fn _convolve(lhs: &[f32], rhs: &[f32]) -> Vec<f32> {
+pub fn _convolve_lti(lhs: &[f32], rhs: &[f32]) -> Vec<f32> {
     if lhs.is_empty() || rhs.is_empty() {
         return Vec::with_capacity(0);
     }
@@ -115,14 +96,14 @@ mod test {
         let b: Vec<f32> = vec![7.0, 8.0];
 
         assert!(
-            _convolve(&a, &b)
+            _convolve_lti(&a, &b)
                 .into_iter()
                 .zip_eq(vec![0.0, 7.0, 22.0, 37.0, 24.0])
                 .all(|(a, b)| approx::relative_eq!(a, b))
         );
 
         assert!(
-            _convolve(&b, &a)
+            _convolve_lti(&b, &a)
                 .into_iter()
                 .zip_eq(vec![0.0, 7.0, 22.0, 37.0, 24.0])
                 .all(|(a, b)| approx::relative_eq!(a, b))
@@ -132,7 +113,7 @@ mod test {
         let b: Vec<f32> = vec![-4.0, 10.0, -1.2, 8.0, 1.0, 1.0];
 
         assert!(
-            _convolve(&a, &b)
+            _convolve_lti(&a, &b)
                 .into_iter()
                 .zip_eq(vec![-212.0, 502.0, -69.6, 605.6, 86.2, 212.0, 26.0, 19.0])
                 .all(|(a, b)| approx::relative_eq!(a, b))
