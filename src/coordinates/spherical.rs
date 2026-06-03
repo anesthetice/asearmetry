@@ -31,13 +31,13 @@ impl std::fmt::Debug for Sphere3D {
         write_float(self.r, f)?;
 
         let θ_opi = self.θ / PI;
-        write!(f, ", θ: π⋅")?;
+        write!(f, ", θ: ")?;
         write_float(θ_opi, f)?;
 
         let φ_opi = self.φ / PI;
-        write!(f, ", φ: π⋅")?;
+        write!(f, "⋅π, φ: ")?;
         write_float(φ_opi, f)?;
-        write!(f, ")")?;
+        write!(f, "⋅π)")?;
 
         Ok(())
     }

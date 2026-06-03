@@ -1,24 +1,23 @@
 #![allow(mixed_script_confusables)]
 #![allow(unused)]
 
-use std::{f64::consts::PI, ops::Add};
-
 use asearmetry::{
     audio::{
         AudioBuffer, AudioBufferSlice, AudioSignal, DiscreteSignal, MonoAudioBuf, MonoAudioBufSlice,
     },
     binaur::{Binauralizer, BinauralizerPrecursor},
-    coordinates::{Cart3D, Sphere3D},
+    coordinates::{Cart3D, Shell2D, Sphere3D},
     math::{Radians, Seconds},
     trajectory::Trajectory,
 };
 use rand::RngExt;
+use std::{f64::consts::PI, ops::Add};
 
 fn simple_circle_trajectory(duration: Seconds) -> Trajectory<Sphere3D> {
     Trajectory::from_equations(
-        |t| Sphere3D::new(1.0 + (t / 4.0), -t * PI / 4.0, PI / 2.0),
+        |t| Sphere3D::new(0.15 + (t / 4.0), -t * PI / 4.0, PI / 2.0),
         duration,
-        0.005,
+        0.0001,
     )
 }
 
@@ -158,10 +157,11 @@ fn binaur_plot() -> anyhow::Result<()> {
 fn main() -> anyhow::Result<()> {
     //return binaur_plot();
 
-    let input = MonoAudioBuf::load_from_file("audio/sample_04.wav")?
-        .apply_low_pass_filter(14_000.0, 256)
+    let input = MonoAudioBuf::load_from_file("audio/sample_03.wav")?
+        //.apply_low_pass_filter(14_000.0, 256)
         .slice_by_time(9.00, 30.00)
         .into_owned();
+
     //let input = MonoAudioBuf::sinusoidal(15.0, 48_000, 0.9, 300.0, 0.0);
     let input_sr = input.sampling_rate().unwrap();
 
@@ -176,16 +176,17 @@ fn main() -> anyhow::Result<()> {
     );
 
     let duration = input.duration().unwrap();
-    //let trajectory = simple_circle_trajectory(duration);
-    let trajectory = change_direction_trajectory(duration);
+    let trajectory = simple_circle_trajectory(duration);
+    //let trajectory = change_direction_trajectory(duration);
 
-    for elem in trajectory.path.iter() {
-        print!("{} ", elem.r);
-    }
+    println!("a");
+    //trajectory.plot();
+    println!("b");
 
-    trajectory.plot();
-
-    let out = binaur.run(&input, trajectory).normalize();
+    let out = binaur
+        .run(&input, trajectory)
+        .apply_low_pass_filter(12_000.0, 256)
+        .normalize();
 
     println!("Writing to file");
     out.write_to_file("audio/out.wav")?;

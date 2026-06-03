@@ -468,7 +468,7 @@ pub trait DiscreteSignal<const C: usize>: Clone + DiscreteSignalUtils<C> {
     fn convolve_ltv<S, H, F1, F2>(&self, h: LtvFilter<S, H, F1, F2>) -> AudioBuffer<1>
     where
         Self: DefinedLtvConvolution,
-        F1: Fn(usize, &mut S, &mut H),
+        F1: Fn(usize, &mut S, &mut Option<H>),
         F2: for<'a> Fn(&'a H) -> &'a [f32],
     {
         self.convolve_ltv_with(h)

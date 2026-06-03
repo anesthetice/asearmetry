@@ -99,7 +99,8 @@ pub trait AudioSignal<const C: usize>: DiscreteSignal<C> {
     fn write_to<W: std::io::Write + std::io::Seek>(&self, writer: &mut W) -> anyhow::Result<()> {
         debug_assert!(
             self.get_abs_max() <= 1.0,
-            "Some samples are out of bounds (∉ [0, 1])"
+            "Some samples are out of bounds (∉ [0, 1]), got absmax of {}",
+            self.get_abs_max()
         );
 
         let sampling_rate = self

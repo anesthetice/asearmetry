@@ -14,6 +14,7 @@ path = "src/app/main.rs"
 [dependencies]
 anyhow = { version = "1.0" }
 approx = { version = "0.5" }
+bon = { version = "3.9" }
 hound = { version = "3.5" }
 itertools = { version = "0.14" }
 indoc = { version = "2.0" }

@@ -35,7 +35,7 @@ impl<T> Trajectory<T> {
         use itertools::Itertools;
         use kuva::prelude::*;
 
-        let (data_xy, data_xz): (Vec<(f64, f64)>, Vec<(f64, f64)>) = self
+        let (data_xy, data_xz) = self
             .path
             .iter()
             .copied()
@@ -43,7 +43,7 @@ impl<T> Trajectory<T> {
                 let xyz = coord.into();
                 ((xyz.x, xyz.y), (xyz.x, xyz.z))
             })
-            .multiunzip();
+            .multiunzip::<(Vec<(f64, f64)>, Vec<(f64, f64)>)>();
 
         let palette = Palette::wong();
 

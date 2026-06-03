@@ -4,7 +4,7 @@ use crate::audio::{AudioBuffer, DiscreteSignal};
 pub trait DefinedLtvConvolution {
     fn convolve_ltv_with<S, H, F1, F2>(&self, h: LtvFilter<S, H, F1, F2>) -> AudioBuffer<1>
     where
-        F1: Fn(usize, &mut S, &mut H),
+        F1: Fn(usize, &mut S, &mut Option<H>),
         F2: for<'a> Fn(&'a H) -> &'a [f32];
 }
 
@@ -14,57 +14,44 @@ where
 {
     fn convolve_ltv_with<S, H, F1, F2>(&self, h: LtvFilter<S, H, F1, F2>) -> AudioBuffer<1>
     where
-        F1: Fn(usize, &mut S, &mut H),
+        F1: Fn(usize, &mut S, &mut Option<H>),
         F2: for<'a> Fn(&'a H) -> &'a [f32],
     {
         AudioBuffer::new_mono(_convolve_ltv(self._cha(0), h), self.sampling_rate())
     }
 }
 
+#[derive(bon::Builder)]
+#[builder(start_fn = new_with_state)]
 pub struct LtvFilter<S, H, F1, F2>
 where
-    F1: Fn(usize, &mut S, &mut H),
+    F1: Fn(usize, &mut S, &mut Option<H>),
     F2: for<'a> Fn(&'a H) -> &'a [f32],
 {
+    #[builder(start_fn)]
     state: S,
-    filter: H,
+    filter: Option<H>,
     update_fn: F1,
     get_fn: F2,
 }
 
 impl<S, H, F1, F2> LtvFilter<S, H, F1, F2>
 where
-    F1: Fn(usize, &mut S, &mut H),
+    F1: Fn(usize, &mut S, &mut Option<H>),
     F2: for<'a> Fn(&'a H) -> &'a [f32],
 {
-    pub fn new(
-        // The filter will immediately be updated, you can just return a default if
-        // the next filter doesn't depend on the previous one.
-        init: impl FnOnce() -> (S, H),
-        update_fn: F1,
-        get_fn: F2,
-    ) -> Self {
-        let (mut state, mut filter) = init();
-        update_fn(0, &mut state, &mut filter);
-
-        Self {
-            state,
-            filter,
-            update_fn,
-            get_fn,
-        }
-    }
     pub fn update(&mut self, n: usize) {
         (self.update_fn)(n, &mut self.state, &mut self.filter);
     }
     pub fn get(&self) -> &[f32] {
-        (self.get_fn)(&self.filter)
+        let filter = self.filter.as_ref().expect("No filter present");
+        (self.get_fn)(filter)
     }
 }
 
 pub fn _convolve_ltv<S, H, F1, F2>(x: &[f32], mut h: LtvFilter<S, H, F1, F2>) -> Vec<f32>
 where
-    F1: Fn(usize, &mut S, &mut H),
+    F1: Fn(usize, &mut S, &mut Option<H>),
     F2: for<'a> Fn(&'a H) -> &'a [f32],
 {
     if x.is_empty() {

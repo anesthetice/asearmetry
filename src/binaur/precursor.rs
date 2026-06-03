@@ -1,6 +1,6 @@
 // Imports
 use crate::{
-    audio::{AudioSignal, DiscreteSignal, StereoAudioBuf},
+    audio::{AudioBuffer, AudioBufferSlice, AudioSignal, DiscreteSignal, StereoAudioBuf},
     binaur::{Binauralizer, HrirProjection},
     coordinates::{Cart3D, Shell2D},
     math::{Hertz, Meters},
@@ -8,6 +8,7 @@ use crate::{
 use anyhow::anyhow;
 use itertools::Itertools;
 use polars::prelude::*;
+use rstar::PointDistance;
 use std::{collections::HashMap, path::Path};
 
 #[derive(Debug, Clone)]
@@ -122,6 +123,8 @@ impl BinauralizerPrecursor {
             .map(|(azimuth, zenith)| Shell2D::new(azimuth, zenith).clamp_angles())
             .collect_vec();
 
+        println!("loaded in {} HRIRs", hrir_vec.len());
+
         Ok(BinauralizerPrecursor {
             hrir_vec,
             hrir_pos_vec,
@@ -171,6 +174,7 @@ impl BinauralizerPrecursor {
             adjust_peak(1);
         });
 
+        /*
         let hrir_rtree = rstar::RTree::bulk_load(
             self.hrir_vec
                 .into_iter()
@@ -178,6 +182,58 @@ impl BinauralizerPrecursor {
                 .map(|(hrir, pos)| HrirProjection::new(pos, hrir))
                 .collect(),
         );
+        */
+
+        // The second step is to interpolate more HRIRs
+        let hrir_rtree = {
+            // Original non-interpolated rtree
+            let hrir_rtree_ni = rstar::RTree::bulk_load(
+                self.hrir_vec
+                    .into_iter()
+                    .zip(self.hrir_pos_vec)
+                    .map(|(hrir, pos)| HrirProjection::new(pos, hrir))
+                    .collect(),
+            );
+
+            const N_NEAREST: usize = 3;
+
+            let rtree_elements = Shell2D::generate_fib_lattice(4096)
+                .into_iter()
+                .map(|new_pos| {
+                    println!("desired position: {}", new_pos);
+                    let mut total_dist = 0.0;
+                    let mut dists = Vec::with_capacity(N_NEAREST);
+                    let mut hrirs = Vec::with_capacity(N_NEAREST);
+
+                    hrir_rtree_ni
+                        .nearest_neighbor_iter(new_pos.into())
+                        .take(N_NEAREST)
+                        .for_each(|gwd| {
+                            let dist = gwd.geom().dist(new_pos);
+                            println!("• close to: {}, with a dist of: {}", gwd.geom(), dist);
+                            total_dist += dist;
+                            dists.push(dist);
+                            hrirs.push(gwd.data.view());
+                        });
+
+                    println!();
+
+                    assert!(total_dist > 0.0);
+
+                    let new_hrir = hrirs.into_iter().zip(dists).fold(
+                        AudioBuffer::<2>::with_capacity(self.hrir_size, None),
+                        |new_hrir, (hrir, dist)| {
+                            let weight = (dist / total_dist) as f32;
+                            new_hrir.merge_with(hrir.apply(|x| x * weight))
+                        },
+                    );
+
+                    HrirProjection::new(new_pos, new_hrir)
+                })
+                .collect_vec();
+
+            rstar::RTree::bulk_load(rtree_elements)
+        };
 
         Binauralizer {
             hrir_rtree,

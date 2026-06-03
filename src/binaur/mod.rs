@@ -9,17 +9,13 @@ pub use precursor::BinauralizerPrecursor;
 
 // Imports
 use crate::{
-    audio::{
-        _convolve_ltv, AudioBuffer, AudioBufferSlice, AudioSignal, DiscreteSignal,
-        DiscreteSignalUtils, LtvFilter, StereoAudioBuf,
-    },
+    audio::{_convolve_ltv, AudioBuffer, AudioBufferSlice, AudioSignal, LtvFilter, StereoAudioBuf},
     coordinates::{Cart3D, Shell2D, Sphere3D},
     math::{Hertz, Meters},
     trajectory::Trajectory,
 };
 use itertools::Itertools;
 use rstar::{RTree, primitives::GeomWithData};
-use std::{f32, num::FpCategory};
 
 pub type HrirProjection = GeomWithData<Shell2D, AudioBuffer<2>>;
 
@@ -57,6 +53,7 @@ impl Binauralizer {
             .take_while(|(_, chunk_last_idx)| *chunk_last_idx < src.len())
             .chain(std::iter::once((src_final_pos, usize::MAX)))
             .collect_vec();
+        assert!(!src_pos_with_last_idx_vec.is_empty());
 
         let mut out = src.into_owned().into_stereo();
 
@@ -65,27 +62,20 @@ impl Binauralizer {
         println!("HRIR step");
         out = out
             .map_cha_enumerate(|c, cha| {
-                let hrir_filter = LtvFilter::new(
-                    || {
-                        let mut src_pos_with_last_idx_iter =
-                            src_pos_with_last_idx_vec.clone().into_iter();
-                        let chunk_last_idx = src_pos_with_last_idx_iter.next().unwrap().1;
-
-                        (
-                            (src_pos_with_last_idx_iter, chunk_last_idx),
-                            AudioBufferSlice::<1>::new_empty(),
-                        )
-                    },
-                    |n, (src_pos_with_last_idx_iter, chunk_last_idx), hrir| {
-                        if n > *chunk_last_idx {
-                            let (src_pos, new_chunk_last_idx) =
-                                src_pos_with_last_idx_iter.next().unwrap();
-                            std::mem::replace(chunk_last_idx, new_chunk_last_idx);
-                            std::mem::replace(hrir, self.get_hrir(src_pos, c));
-                        }
-                    },
-                    |hrir| hrir.cha_uc(0),
-                );
+                let hrir_filter = LtvFilter::new_with_state((
+                    src_pos_with_last_idx_vec.clone().into_iter(),
+                    0_usize,
+                ))
+                .update_fn(|n, (src_pos_with_last_idx_iter, chunk_last_idx), hrir| {
+                    if n > *chunk_last_idx || *chunk_last_idx == 0 {
+                        let (src_pos, new_chunk_last_idx) =
+                            src_pos_with_last_idx_iter.next().unwrap();
+                        *chunk_last_idx = new_chunk_last_idx;
+                        let _ = hrir.replace(self.get_hrir(src_pos, c));
+                    }
+                })
+                .get_fn(|hrir| hrir.cha_uc(0))
+                .build();
 
                 _convolve_ltv(cha, hrir_filter)
             })
@@ -100,39 +90,32 @@ impl Binauralizer {
             .map_cha_enumerate(|c, cha| {
                 let rcv_pos = self.get_ear_pos(c);
 
-                let delay_filter = LtvFilter::new(
-                    || {
-                        let mut src_pos_with_last_idx_iter =
-                            src_pos_with_last_idx_vec.clone().into_iter();
-                        let chunk_last_idx = src_pos_with_last_idx_iter.next().unwrap().1;
+                let delay_filter = LtvFilter::new_with_state((
+                    src_pos_with_last_idx_vec.clone().into_iter(),
+                    0_usize,
+                ))
+                .update_fn(|n, (src_pos_with_last_idx_iter, chunk_last_idx), filter| {
+                    if n > *chunk_last_idx || *chunk_last_idx == 0 {
+                        let (src_pos, new_chunk_last_idx) =
+                            src_pos_with_last_idx_iter.next().unwrap();
+                        *chunk_last_idx = new_chunk_last_idx;
 
-                        (
-                            (src_pos_with_last_idx_iter, chunk_last_idx),
-                            Vec::<f32>::with_capacity(0),
-                        )
-                    },
-                    |n, (src_pos_with_last_idx_iter, chunk_last_idx), filter| {
-                        if n > *chunk_last_idx {
-                            let (src_pos, new_chunk_last_idx) =
-                                src_pos_with_last_idx_iter.next().unwrap();
-                            let _ = std::mem::replace(chunk_last_idx, new_chunk_last_idx);
+                        let new_filter = {
+                            let dist_to_ear_in_samples = (sampling_rate
+                                * (src_pos.into().dist(rcv_pos) / SOUND_VELOCITY_IN_AIR))
+                                .round()
+                                as usize;
+                            let mut temp = vec![0.0_f32; dist_to_ear_in_samples.saturating_sub(1)];
+                            temp.push(1.0);
+                            temp
+                        };
 
-                            let new_filter = {
-                                let dist_to_ear_in_samples = (sampling_rate
-                                    * (src_pos.into().dist(rcv_pos) / SOUND_VELOCITY_IN_AIR))
-                                    .round()
-                                    as usize;
-                                let mut new_delay_filter =
-                                    vec![0.0_f32; dist_to_ear_in_samples.saturating_sub(1)];
-                                new_delay_filter.push(1.0);
-                                new_delay_filter
-                            };
+                        let _ = filter.replace(new_filter);
+                    }
+                })
+                .get_fn(|filter| filter.as_slice())
+                .build();
 
-                            let _ = std::mem::replace(filter, new_filter);
-                        }
-                    },
-                    |filter| filter.as_slice(),
-                );
                 _convolve_ltv(cha, delay_filter)
             })
             .into();

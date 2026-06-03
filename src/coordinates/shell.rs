@@ -1,7 +1,7 @@
 use super::{clamp_azimuth, clamp_zenith};
 use crate::coordinates::{Cart3D, Sphere3D};
 use crate::math::Radians;
-use std::f64::consts::{PI, TAU};
+use std::f64::consts::{GOLDEN_RATIO, PI, TAU};
 
 #[derive(Clone, Copy, PartialEq)]
 #[cfg_attr(feature = "bitcode", derive(bitcode::Encode, bitcode::Decode))]
@@ -24,13 +24,13 @@ impl std::fmt::Debug for Shell2D {
         };
 
         let θ_opi = self.θ / PI;
-        write!(f, "(θ: π⋅")?;
+        write!(f, "(θ: ")?;
         write_float(θ_opi, f)?;
 
         let φ_opi = self.φ / PI;
-        write!(f, ", φ: π⋅")?;
+        write!(f, "⋅π, φ: ")?;
         write_float(φ_opi, f)?;
-        write!(f, ")")?;
+        write!(f, "⋅π)")?;
 
         Ok(())
     }
@@ -57,7 +57,26 @@ impl Shell2D {
         self
     }
 
-    pub fn dist(&self, other: Shell2D) -> f64 {
+    /// See https://observablehq.com/@meetamit/fibonacci-lattices
+    #[allow(non_upper_case_globals)]
+    pub fn generate_fib_lattice(n_points: usize) -> Vec<Self> {
+        // golden ratio
+        const Φ: f64 = GOLDEN_RATIO;
+        const ε: f64 = 0.4;
+
+        let n = n_points as f64;
+
+        (0..n_points)
+            .map(|i| i as f64)
+            .map(|i| {
+                let (x_i, y_i) = ((i / Φ) % 1.0, (i + ε) / (n - 1.0 + 2.0 * ε));
+                Shell2D::new(clamp_azimuth(2.0 * PI * x_i), f64::acos(1.0 - 2.0 * y_i))
+            })
+            .collect()
+    }
+
+    /// Angular distance (not euclidian)
+    pub fn dist(&self, other: Self) -> f64 {
         let θ1 = self.θ;
         let θ2 = other.θ;
         let θ_diff = f64::min((θ1 - θ2).abs(), TAU - (θ1 - θ2).abs());
