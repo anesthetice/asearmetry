@@ -12,7 +12,7 @@ pub trait AudioSignal<const C: usize>: DiscreteSignal<C> {
     }
 
     fn delay(&self, by: Seconds) -> AudioBuffer<C> {
-        let sampling_rate = self.sampling_rate().expect("Sampling rate is not defined");
+        let sampling_rate = self.sr_or_panic();
         self.pad_left((by * sampling_rate).ceil() as usize)
     }
 
@@ -24,10 +24,7 @@ pub trait AudioSignal<const C: usize>: DiscreteSignal<C> {
         Self: super::DefinedLtiConvolution<C, 1, C>,
     {
         let num_taps = (M * 2) + 1;
-        let f_norm = cutoff_freq
-            / self
-                .sampling_rate_f32()
-                .expect("Sampling rate is not known");
+        let f_norm = cutoff_freq / self.sr_f32_or_panic();
 
         if f_norm > 0.5 {
             eprintln!(
@@ -134,9 +131,7 @@ pub trait AudioSignal<const C: usize>: DiscreteSignal<C> {
             .open(filepath)?;
 
         self.write_to(&mut file)?;
-
         file.sync_all()?;
-
         Ok(())
     }
 }

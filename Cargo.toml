@@ -19,22 +19,29 @@ hound = { version = "3.5" }
 itertools = { version = "0.14" }
 indoc = { version = "2.0" }
 num-traits = { version = "0.2" }
+petgraph = { version = "0.8" }
 rand = { version = "0.10" }
 rstar = { version = "0.13" }
 symphonia = { version = "0.6" }
+tap = { version = "1.0" }
 
 # optional dependencies
 bitcode = { version = "0.6", optional = true, features = ["derive"] }
+cosmic-text = { version = "0.19", optional = true }
 kuva = { version = "0.2", optional = true }
+pixels = { version = "0.17", optional = true }
 polars = { version = "0.53", default-features = false, features = ["fmt", "parquet"], optional = true }
 serde = { version = "1.0", optional = true, features = ["derive"] }
+tiny-skia = { version = "0.12", optional = true }
+winit = { version = "0.30", optional = true }
 
 [features]
-default = ["bitcode", "plot", "polars", "serde"]
+default = ["bitcode", "plot", "polars", "serde", "viewer"]
 bitcode = ["dep:bitcode"]
 plot = ["dep:kuva"]
 polars = ["dep:polars"]
 serde = ["dep:serde", "rstar/serde"]
+viewer = ["dep:pixels", "dep:winit", "dep:cosmic-text", "dep:tiny-skia"]
 
 [profile.dev]
 opt-level = 1

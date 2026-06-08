@@ -17,7 +17,6 @@ impl<'data, const C: usize> AudioBufferSlice<'data, C> {
             sampling_rate: None,
         }
     }
-
     pub fn with_sr(mut self, sampling_rate: Hertz) -> Self {
         self.sampling_rate = Some(sampling_rate);
         self
@@ -26,7 +25,6 @@ impl<'data, const C: usize> AudioBufferSlice<'data, C> {
         self.sampling_rate = sampling_rate;
         self
     }
-
     pub fn stack_ref<'a, 'b, const C1: usize, const C2: usize>(
         a: AudioBufferSlice<'a, C1>,
         b: AudioBufferSlice<'b, C2>,

@@ -2,7 +2,7 @@
 use super::{DefinedLtiConvolution, DefinedLtvConvolution};
 use crate::{
     audio::{AudioBuffer, AudioBufferSlice, DiscreteSignalUtils, LtvFilter},
-    math::{Hertz, Seconds},
+    math::{Hertz, Seconds, sinc},
 };
 use itertools::Itertools;
 use std::f32::consts::PI;
@@ -30,21 +30,41 @@ pub trait DiscreteSignal<const C: usize>: Clone + DiscreteSignalUtils<C> {
         self.lens().into_iter().max().unwrap_or(0)
     }
 
+    fn sampling_rate_f32(&self) -> Option<f32> {
+        self.sampling_rate().map(|sr| sr as f32)
+    }
+
+    fn sampling_rate_usize(&self) -> Option<usize> {
+        self.sampling_rate().map(|sr| sr.round() as usize)
+    }
+
+    fn sampling_rate_u32(&self) -> Option<u32> {
+        self.sampling_rate().map(|sr| sr.round() as u32)
+    }
+
     /// Alias for [`Self::sampling_rate`].
     fn sr(&self) -> Option<Hertz> {
         self.sampling_rate()
     }
 
-    fn sampling_rate_f32(&self) -> Option<f32> {
-        self.sr().map(|sr| sr as f32)
+    fn sr_or_panic(&self) -> Hertz {
+        self.sampling_rate()
+            .expect("Signal is required to have a defined sampling rate")
     }
 
-    fn sampling_rate_usize(&self) -> Option<usize> {
-        self.sr().map(|sr| sr.round() as usize)
+    fn sr_f32_or_panic(&self) -> f32 {
+        self.sampling_rate_f32()
+            .expect("Signal is required to have a defined sampling rate")
     }
 
-    fn sampling_rate_u32(&self) -> Option<u32> {
-        self.sr().map(|sr| sr.round() as u32)
+    fn sr_usize_or_panic(&self) -> usize {
+        self.sampling_rate_usize()
+            .expect("Signal is required to have a defined sampling rate")
+    }
+
+    fn sr_u32_or_panic(&self) -> u32 {
+        self.sampling_rate_u32()
+            .expect("Signal is required to have a defined sampling rate")
     }
 
     /// Note: will only panic if sampling rates are incoherent when debug assertions are enabled.
@@ -78,10 +98,7 @@ pub trait DiscreteSignal<const C: usize>: Clone + DiscreteSignalUtils<C> {
     }
 
     fn seconds_to_index(&self, s: Seconds) -> usize {
-        let Some(sampling_rate) = self.sr() else {
-            panic!("Sampling rate not defined");
-        };
-        (sampling_rate * s).round() as usize
+        (self.sr_or_panic() * s).round() as usize
     }
 
     fn first_n_owned(self, n: usize) -> AudioBuffer<C> {
@@ -137,7 +154,7 @@ pub trait DiscreteSignal<const C: usize>: Clone + DiscreteSignalUtils<C> {
         T1: DiscreteSignal<C>,
         T2: DiscreteSignal<C>,
     {
-        let sampling_rate = Self::resolve_sampling_rate_pair(a.sampling_rate(), b.sampling_rate());
+        let sampling_rate = Self::resolve_sampling_rate_pair(a.sr(), b.sr());
 
         let (mut acc, other) = if a.len() >= b.len() {
             (a.into_owned(), b._as_view())
@@ -157,6 +174,25 @@ pub trait DiscreteSignal<const C: usize>: Clone + DiscreteSignalUtils<C> {
         T: DiscreteSignal<C>,
     {
         Self::merge(self, other)
+    }
+
+    fn merge_with_at<T>(self, other: T, offset: usize) -> AudioBuffer<C>
+    where
+        T: DiscreteSignal<C>,
+    {
+        let sampling_rate = Self::resolve_sampling_rate_pair(self.sr(), other.sr());
+        let total_length = self.max_len().max(offset + other.max_len());
+
+        let mut acc = self.pad_right_to_len(total_length);
+
+        for (cha_acc, cha_other) in acc.iter_cha_mut().zip(other._iter_cha()) {
+            cha_acc[offset..]
+                .iter_mut()
+                .zip(cha_other)
+                .for_each(|(l, r)| *l += r)
+        }
+
+        acc.with_sr_opt(sampling_rate)
     }
 
     fn merge_many<T, I>(input: I) -> AudioBuffer<C>
@@ -193,7 +229,7 @@ pub trait DiscreteSignal<const C: usize>: Clone + DiscreteSignalUtils<C> {
     {
         let mut out = self.into_owned();
         out.iter_cha_mut()
-            .for_each(|cha| cha.iter_mut().for_each(|x| *x = (&mut op)(*x)));
+            .for_each(|cha| cha.iter_mut().for_each(|x| *x = op(*x)));
         out
     }
 
@@ -205,7 +241,7 @@ pub trait DiscreteSignal<const C: usize>: Clone + DiscreteSignalUtils<C> {
         out.iter_cha_mut().for_each(|cha| {
             cha.iter_mut()
                 .enumerate()
-                .for_each(|(n, x)| *x = (&mut op)((n, *x)))
+                .for_each(|(n, x)| *x = op((n, *x)))
         });
         out
     }
@@ -223,7 +259,7 @@ pub trait DiscreteSignal<const C: usize>: Clone + DiscreteSignalUtils<C> {
             for i in 0..cha.len() {
                 let range = i.saturating_sub(M)..(i + M + 1).min(cha.len());
                 let x = unsafe { cha.get_unchecked(range) };
-                buffer.push((&mut op)(x))
+                buffer.push(op(x))
             }
             buffer
         });
@@ -299,6 +335,79 @@ pub trait DiscreteSignal<const C: usize>: Clone + DiscreteSignalUtils<C> {
                 .for_each(|cha| cha.iter_mut().for_each(|x| *x /= abs_max));
         }
         out
+    }
+
+    #[allow(non_snake_case)]
+    fn resample(&self, sampling_rate: Hertz, M: usize) -> AudioBuffer<C> {
+        assert!(sampling_rate > 0.0);
+        let f1 = self.sr_or_panic();
+        let T1 = 1.0 / f1;
+        let f2 = sampling_rate;
+        let T2 = 1.0 / f2;
+
+        let channels = self._map_cha(|x_f1| {
+            let x_f1_len = x_f1.len();
+            let x_f2_len = (f2 * x_f1_len as f64 / f1).ceil() as usize;
+
+            let mut x_f2 = Vec::with_capacity(x_f2_len);
+
+            for n2 in 0..x_f2_len {
+                // Alternative approach, the maximum argument allowed, as when |x| -> ∞, sinc(x) -> 0.
+                //let n1_start = (n2 as f64 * f1 / f2 - sinc_arg_abs_max).floor().max(0.0) as usize;
+                //let n1_stop = (1 + (n2 as f64 * f1 / f2 + sinc_arg_abs_max).ceil() as usize).min(x_f1_len);
+
+                let n1_center_ideal = (n2 as f64 * f1 / f2) as f32;
+                let n1_start = (n1_center_ideal.round() as usize).saturating_sub(M);
+                let n1_stop = (n1_center_ideal.round() as usize + M + 1).min(x_f1_len);
+
+                let x_f2_n2 = (n1_start..n1_stop)
+                    .map(|n1| {
+                        let hann_like =
+                            f32::cos(PI * (n1 as f32 - n1_center_ideal) / (2 * M) as f32).powi(2);
+                        x_f1[n1] * hann_like * sinc(f1 * (n2 as f64 * T2 - n1 as f64 * T1)) as f32
+                    })
+                    .sum::<f32>();
+
+                x_f2.push(x_f2_n2);
+            }
+
+            x_f2
+        });
+
+        AudioBuffer::new(channels, Some(sampling_rate))
+    }
+
+    #[allow(non_snake_case)]
+    fn resample_pure(&self, sampling_rate: Hertz) -> AudioBuffer<C> {
+        assert!(sampling_rate > 0.0);
+        let f1 = self.sr_or_panic();
+        let T1 = 1.0 / f1;
+        let f2 = sampling_rate;
+        let T2 = 1.0 / f2;
+
+        let channels = self._map_cha(|x_f1| {
+            let x_f1_len = x_f1.len();
+            let x_f2_len = (f2 * x_f1_len as f64 / f1).ceil() as usize;
+
+            let mut x_f2 = Vec::with_capacity(x_f2_len);
+
+            for n2 in 0..x_f2_len {
+                let x_f2_n2 = x_f1
+                    .iter()
+                    .copied()
+                    .enumerate()
+                    .map(|(n1, x_f1_n1)| {
+                        x_f1_n1 * sinc(f1 * (n2 as f64 * T2 - n1 as f64 * T1)) as f32
+                    })
+                    .sum::<f32>();
+
+                x_f2.push(x_f2_n2);
+            }
+
+            x_f2
+        });
+
+        AudioBuffer::new(channels, Some(sampling_rate))
     }
 
     fn concatenate<T, I>(input: I) -> AudioBuffer<C>
@@ -460,7 +569,7 @@ pub trait DiscreteSignal<const C: usize>: Clone + DiscreteSignalUtils<C> {
             // the ideal case, from M to N-M-1
             y.skip_first_n_owned(M).skip_last_n_owned(M)
         } else {
-            eprintln!("Warning, filter length is even");
+            eprintln!("Warning, the filter has a length that is even");
             y.skip_first_n_owned(M - 1).skip_last_n_owned(M)
         }
     }
@@ -499,22 +608,36 @@ pub trait DiscreteSignal<const C: usize>: Clone + DiscreteSignalUtils<C> {
     }
 
     #[cfg(feature = "plot")]
-    fn plot(&self) -> Vec<kuva::prelude::Plot> {
+    fn plot(&self, line_stroke_width: Option<f64>) -> Vec<kuva::prelude::Plot> {
         use kuva::prelude::*;
 
+        let line_stroke_width = line_stroke_width.unwrap_or(1.0);
+
         self._map_cha_enumerate(|i, cha| {
-            let legend: String = match i {
-                0 => "channel 0 (left ear)".to_string(),
-                1 => "channel 1 (right ear)".to_string(),
-                i => format!("channel {i}"),
+            let legend: String = match (i, C) {
+                (0, 2) => "channel 0 (left ear)".to_string(),
+                (1, 2) => "channel 1 (right ear)".to_string(),
+                (i, _) => format!("channel {i}"),
             };
             let palette = Palette::wong();
             let color = &palette.colors()[i % palette.len()];
 
-            LinePlot::new()
-                .with_data(cha.iter().enumerate().map(|(x, y)| (x as f64, *y as f64)))
-                .with_color(color)
-                .with_legend(legend)
+            if let Some(sr) = self.sampling_rate() {
+                LinePlot::new()
+                    .with_data(
+                        cha.iter()
+                            .enumerate()
+                            .map(|(x, y)| (x as f64 / sr, *y as f64)),
+                    )
+                    .with_color(color)
+                    .with_stroke_width(line_stroke_width)
+                    .with_legend(legend)
+            } else {
+                LinePlot::new()
+                    .with_data(cha.iter().enumerate().map(|(x, y)| (x as f64, *y as f64)))
+                    .with_color(color)
+                    .with_legend(legend)
+            }
         })
         .into_iter()
         .map(Plot::from)

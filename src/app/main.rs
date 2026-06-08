@@ -1,6 +1,10 @@
 #![allow(mixed_script_confusables)]
 #![allow(unused)]
 
+// Modules
+mod misc;
+
+// Imports
 use asearmetry::{
     audio::{
         AudioBuffer, AudioBufferSlice, AudioSignal, DiscreteSignal, MonoAudioBuf, MonoAudioBufSlice,
@@ -8,16 +12,68 @@ use asearmetry::{
     binaur::{Binauralizer, BinauralizerPrecursor},
     coordinates::{Cart3D, Shell2D, Sphere3D},
     math::{Radians, Seconds},
-    trajectory::Trajectory,
+    trajectory::{self, Trajectory},
 };
+use itertools::Itertools;
 use rand::RngExt;
 use std::{f64::consts::PI, ops::Add};
+use tap::Tap;
+
+fn main() -> anyhow::Result<()> {
+    asearmetry::scene::build()
+        .trajectory(
+            simple_circle_trajectory(10.0)
+                .with_basis::<Cart3D>()
+                .downsample(1.0 / 30.0),
+        )
+        .call();
+
+    return Ok(());
+
+    //return binaur_plot();
+
+    let input = MonoAudioBuf::load_from_file("audio/sample_03.wav")?
+        //.apply_low_pass_filter(14_000.0, 256)
+        .slice_by_time(9.00, 30.00)
+        .into_owned();
+
+    //let input = MonoAudioBuf::sinusoidal(15.0, 48_000, 0.9, 300.0, 0.0);
+    let input_sr = input.sampling_rate().unwrap();
+
+    let binaur = BinauralizerPrecursor::load_from_file(
+        "sofa_conversion/output/AKO536081622_1_processed.asear.hrtf.parquet",
+    )?
+    .into_binauralizer();
+
+    println!(
+        "input freq: {}; HRIR freq: {}",
+        input_sr, binaur.hrir_sampling_rate
+    );
+
+    let duration = input.duration().unwrap();
+    let trajectory = simple_circle_trajectory(duration);
+    //let trajectory = change_direction_trajectory(duration);
+
+    println!("a");
+    //trajectory.plot(Some(1.5));
+    println!("b");
+
+    let out = binaur
+        .run(&input, trajectory)
+        .apply_low_pass_filter(12_000.0, 256)
+        .normalize();
+
+    println!("Writing to file");
+    out.write_to_file("audio/out.wav")?;
+
+    Ok(())
+}
 
 fn simple_circle_trajectory(duration: Seconds) -> Trajectory<Sphere3D> {
     Trajectory::from_equations(
-        |t| Sphere3D::new(0.15 + (t / 4.0), -t * PI / 4.0, PI / 2.0),
+        |t| Sphere3D::new(0.5, -t * PI / 4.0, PI / 2.0),
         duration,
-        0.0001,
+        1.0 / 1024.0,
     )
 }
 
@@ -99,97 +155,4 @@ fn bespoke_trajectory(duration: Seconds) -> Trajectory<Sphere3D> {
         duration,
         1E-4,
     )
-}
-
-fn binaur_plot() -> anyhow::Result<()> {
-    let binaur_precursor =
-        BinauralizerPrecursor::load_from_file("sofa_conversion/output/hrtf.parquet")?;
-
-    let binaur_raw = binaur_precursor.clone().into_binauralizer_no_processing();
-    let binaur_pro = binaur_precursor.clone().into_binauralizer();
-
-    let pos_array = [
-        Sphere3D::new(1.0, 0.0, PI / 2.0),
-        Sphere3D::new(1.0, PI / 2.0, PI / 2.0),
-        Sphere3D::new(1.0, -PI / 2.0, PI / 2.0),
-    ];
-
-    use kuva::prelude::*;
-
-    let mut plots: Vec<Vec<Plot>> = Vec::new();
-    let mut layouts: Vec<Layout> = Vec::new();
-    for pos in pos_array {
-        let raw_plot = binaur_raw.get_hrir_both(pos).slice(0..80).plot();
-        let raw_layout = Layout::auto_from_plots(&raw_plot).with_title(format!("Raw @ {pos}"));
-        plots.push(raw_plot);
-        layouts.push(raw_layout);
-
-        let pro_plot = binaur_pro.get_hrir_both(pos).slice(0..80).plot();
-        let pro_layout = Layout::auto_from_plots(&pro_plot).with_title(format!("Pro @ {pos}"));
-        plots.push(pro_plot);
-        layouts.push(pro_layout);
-
-        let hrir = binaur_raw.get_hrir_both(pos);
-        let smooth_plot = hrir
-            .abs()
-            .apply_gaussian_filter(10, 0.05)
-            .normalize_to(hrir.get_abs_max())
-            .slice(0..80)
-            .plot();
-        let smooth_layout =
-            Layout::auto_from_plots(&smooth_plot).with_title(format!("Smooth @ {pos}"));
-        plots.push(smooth_plot);
-        layouts.push(smooth_layout);
-    }
-
-    let scene = Figure::new(pos_array.len(), 3)
-        .with_plots(plots)
-        .with_layouts(layouts)
-        .with_shared_legend_bottom()
-        .render();
-
-    let svg = SvgBackend.render_scene(&scene);
-    std::fs::write("figure.svg", svg).unwrap();
-
-    Ok(())
-}
-
-fn main() -> anyhow::Result<()> {
-    //return binaur_plot();
-
-    let input = MonoAudioBuf::load_from_file("audio/sample_03.wav")?
-        //.apply_low_pass_filter(14_000.0, 256)
-        .slice_by_time(9.00, 30.00)
-        .into_owned();
-
-    //let input = MonoAudioBuf::sinusoidal(15.0, 48_000, 0.9, 300.0, 0.0);
-    let input_sr = input.sampling_rate().unwrap();
-
-    let binaur = BinauralizerPrecursor::load_from_file(
-        "sofa_conversion/output/AKO536081622_1_processed.asear.hrtf.parquet",
-    )?
-    .into_binauralizer();
-
-    println!(
-        "input freq: {}; HRIR freq: {}",
-        input_sr, binaur.hrir_sampling_rate
-    );
-
-    let duration = input.duration().unwrap();
-    let trajectory = simple_circle_trajectory(duration);
-    //let trajectory = change_direction_trajectory(duration);
-
-    println!("a");
-    //trajectory.plot();
-    println!("b");
-
-    let out = binaur
-        .run(&input, trajectory)
-        .apply_low_pass_filter(12_000.0, 256)
-        .normalize();
-
-    println!("Writing to file");
-    out.write_to_file("audio/out.wav")?;
-
-    Ok(())
 }

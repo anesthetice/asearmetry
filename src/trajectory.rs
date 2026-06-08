@@ -27,6 +27,44 @@ impl<T> Trajectory<T> {
         Self { path, δt }
     }
 
+    pub fn with_basis<U: From<T>>(self) -> Trajectory<U> {
+        Trajectory {
+            path: self.path.into_iter().map(U::from).collect(),
+            δt: self.δt,
+        }
+    }
+
+    pub fn downsample(self, δt_desired: Seconds) -> Self
+    where
+        T: Copy + core::ops::Add<T, Output = T> + core::ops::Mul<f64, Output = T>,
+    {
+        assert!(δt_desired >= self.δt);
+        let δt_i = self.δt;
+        let δt_f = δt_desired;
+
+        let new_path_len = (self.path.len() as f64 * δt_i / δt_f).ceil() as usize;
+        let mut new_path = Vec::with_capacity(new_path_len);
+
+        (0..new_path_len).for_each(|idx_f| {
+            let idx_i_approx = idx_f as f64 * δt_f / δt_i;
+
+            let idx_i_left = idx_i_approx.floor() as usize;
+            let weight_left = 1.0 - f64::abs(idx_i_approx - idx_i_approx.floor());
+            let point_left = self.path[idx_i_left] * weight_left;
+
+            let idx_i_right = idx_i_approx.ceil() as usize;
+            let weight_right = 1.0 - weight_left;
+            let point_right = self.path[idx_i_right] * weight_right;
+
+            new_path.push(point_left + point_right);
+        });
+
+        Self {
+            path: new_path,
+            δt: δt_f,
+        }
+    }
+
     #[cfg(feature = "plot")]
     pub fn plot(&self)
     where

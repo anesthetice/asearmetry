@@ -5,4 +5,5 @@ pub mod audio;
 pub mod binaur;
 pub mod coordinates;
 pub mod math;
+pub mod scene;
 pub mod trajectory;

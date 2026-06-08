@@ -36,9 +36,8 @@ impl Binauralizer {
         A: AudioSignal<1>,
         T: Into<Cart3D> + Copy,
     {
-        let src_sampling_rate = src.sampling_rate().expect("No sampling rate");
-        approx::assert_abs_diff_eq!(self.hrir_sampling_rate, src_sampling_rate, epsilon = 0.1);
-        let sampling_rate = src_sampling_rate;
+        let sampling_rate = src.sr_or_panic();
+        approx::assert_abs_diff_eq!(self.hrir_sampling_rate, sampling_rate, epsilon = 0.1);
 
         let src_final_pos = *trajectory.path.last().unwrap();
         let src_pos_with_last_idx_vec = trajectory
@@ -80,7 +79,7 @@ impl Binauralizer {
                 _convolve_ltv(cha, hrir_filter)
             })
             .into();
-        out.set_sr(src_sampling_rate);
+        out.set_sr(sampling_rate);
 
         // --- Adding back ITD to sound ---
         //
@@ -119,7 +118,7 @@ impl Binauralizer {
                 _convolve_ltv(cha, delay_filter)
             })
             .into();
-        out.set_sr(src_sampling_rate);
+        out.set_sr(sampling_rate);
 
         out
     }

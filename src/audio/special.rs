@@ -1,7 +1,7 @@
 // Imports
 use crate::{
     audio::{AudioBuffer, AudioBufferSlice, DiscreteSignal},
-    math::{Hertz, Meters, Radians, Seconds},
+    math::{Hertz, Radians, Seconds},
 };
 use itertools::Itertools;
 use std::f64::consts::TAU;
@@ -42,7 +42,8 @@ impl MonoAudioBuf {
         frequency: Hertz,
         phase_offset: Radians,
     ) -> Self {
-        assert!(amplitude.abs() <= 1.0);
+        // Maybe just issue a warning instead?
+        //assert!(amplitude.abs() <= 1.0);
 
         let nb_samples = (sampling_rate * duration).ceil() as usize;
         let δt = 1.0 / sampling_rate;
