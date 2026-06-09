@@ -2,6 +2,8 @@
 name = "asearmetry"
 version = "0.0.1"
 edition = "2024"
+license = "MPL-2.0"
+license-file = "LICENSE.txt"
 
 [lib]
 name = "asearmetry"

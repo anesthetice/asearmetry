@@ -1,3 +1,9 @@
+/*
+ * This Source Code Form is subject to the terms of the Mozilla Public
+ * License, v. 2.0. If a copy of the MPL was not distributed with this
+ * file, You can obtain one at https://mozilla.org/MPL/2.0/.
+*/
+
 //! Why not include all of this in the [`DiscreteSignal`] trait? Because then for instance
 //! the declaration of `cha` would have to be `fn cha(&self, c: usize) -> &[f32]`. And
 //! even if we used `fn cha(&self, c: usize) -> &'data [f32]`, the prior lifetime "squash"
