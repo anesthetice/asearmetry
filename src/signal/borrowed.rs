@@ -5,22 +5,24 @@
 */
 
 use crate::{
-    audio::{AudioBuffer, AudioBufferSlice, DiscreteSignal},
     math::Hertz,
+    signal::{DSP, Domain, Sample, Signal, SignalSlice, TimeDomain},
 };
 use itertools::Itertools;
 
-impl<'data, const C: usize> AudioBufferSlice<'data, C> {
-    pub fn new(channels: [&'data [f32]; C], sampling_rate: Option<Hertz>) -> Self {
+impl<'data, const C: usize, S: Sample, D: Domain> SignalSlice<'data, C, S, D> {
+    pub fn new(channels: [&'data [S]; C], sampling_rate: Option<Hertz>) -> Self {
         Self {
             channels,
             sampling_rate,
+            _domain: D::default(),
         }
     }
     pub fn new_empty() -> Self {
         Self {
             channels: std::array::repeat(&[]),
             sampling_rate: None,
+            _domain: D::default(),
         }
     }
     pub fn with_sr(mut self, sampling_rate: Hertz) -> Self {
@@ -32,15 +34,15 @@ impl<'data, const C: usize> AudioBufferSlice<'data, C> {
         self
     }
     pub fn stack_ref<'a, 'b, const C1: usize, const C2: usize>(
-        a: AudioBufferSlice<'a, C1>,
-        b: AudioBufferSlice<'b, C2>,
+        a: SignalSlice<'a, C1, S, D>,
+        b: SignalSlice<'b, C2, S, D>,
     ) -> Self
     where
         'a: 'data, // 'a outlives 'data
         'b: 'data, // 'b outlives 'data
     {
         let sampling_rate = Self::resolve_sampling_rate_pair(a.sr(), b.sr());
-        let channels: [&'data [f32]; C] =
+        let channels: [&'data [S]; C] =
             itertools::chain!(a.channels.into_iter(), b.channels.into_iter(),)
                 .collect_array()
                 .unwrap();
@@ -49,49 +51,60 @@ impl<'data, const C: usize> AudioBufferSlice<'data, C> {
     }
 }
 
-impl<'data, const C: usize> From<&'data AudioBuffer<C>> for AudioBufferSlice<'data, C> {
-    fn from(value: &'data AudioBuffer<C>) -> Self {
+impl<'data, const C: usize, S: Sample, D: Domain> From<&'data Signal<C, S, D>>
+    for SignalSlice<'data, C, S, D>
+{
+    fn from(value: &'data Signal<C, S, D>) -> Self {
         Self {
             channels: std::array::from_fn(|i| value.channels[i].as_slice()),
             sampling_rate: value.sampling_rate,
+            _domain: value._domain,
         }
     }
 }
 
-impl<'data, const C: usize> From<[&'data [f32]; C]> for AudioBufferSlice<'data, C> {
-    fn from(value: [&'data [f32]; C]) -> Self {
+impl<'data, const C: usize, S: Sample> From<[&'data [S]; C]>
+    for SignalSlice<'data, C, S, TimeDomain>
+{
+    fn from(value: [&'data [S]; C]) -> Self {
         Self {
             channels: value,
             sampling_rate: None,
+            _domain: TimeDomain::default(),
         }
     }
 }
 
-impl<'data, const C: usize> From<([&'data [f32]; C], Option<Hertz>)>
-    for AudioBufferSlice<'data, C>
+impl<'data, const C: usize, S: Sample> From<([&'data [S]; C], Option<Hertz>)>
+    for SignalSlice<'data, C, S, TimeDomain>
 {
-    fn from(value: ([&'data [f32]; C], Option<Hertz>)) -> Self {
+    fn from(value: ([&'data [S]; C], Option<Hertz>)) -> Self {
         Self {
             channels: value.0,
             sampling_rate: value.1,
+            _domain: TimeDomain::default(),
         }
     }
 }
 
-impl<'data, const C: usize> From<([&'data [f32]; C], Hertz)> for AudioBufferSlice<'data, C> {
-    fn from(value: ([&'data [f32]; C], Hertz)) -> Self {
+impl<'data, const C: usize, S: Sample> From<([&'data [S]; C], Hertz)>
+    for SignalSlice<'data, C, S, TimeDomain>
+{
+    fn from(value: ([&'data [S]; C], Hertz)) -> Self {
         Self {
             channels: value.0,
             sampling_rate: Some(value.1),
+            _domain: TimeDomain::default(),
         }
     }
 }
 
-impl<'data> From<&'data [f32]> for AudioBufferSlice<'data, 1> {
-    fn from(value: &'data [f32]) -> Self {
+impl<'data, S: Sample> From<&'data [S]> for SignalSlice<'data, 1, S, TimeDomain> {
+    fn from(value: &'data [S]) -> Self {
         Self {
             channels: [value],
             sampling_rate: None,
+            _domain: TimeDomain::default(),
         }
     }
 }
@@ -111,14 +124,16 @@ impl<'data, const C: usize, U: num_traits::AsPrimitive<u32>> From<([&'data [f32]
 */
 
 #[cfg(feature = "serde")]
-impl<'data, const C: usize> serde::Serialize for AudioBufferSlice<'data, C>
+impl<'data, const C: usize, S: Sample, D: Domain> serde::Serialize for SignalSlice<'data, C, S, D>
 where
-    [&'data [f32]; C]: serde::Serialize,
+    [&'data [S]; C]: serde::Serialize,
+    S: serde::Serialize,
+    D: serde::Serialize,
 {
-    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+    fn serialize<SE>(&self, serializer: SE) -> Result<SE::Ok, SE::Error>
     where
-        S: serde::Serializer,
+        SE: serde::Serializer,
     {
-        (self.channels, self.sampling_rate).serialize(serializer)
+        (self.channels, self.sampling_rate, self._domain).serialize(serializer)
     }
 }

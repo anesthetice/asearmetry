@@ -11,13 +11,15 @@ mod store;
 mod precursor;
 
 // Exports
+#[cfg(feature = "polars")]
 pub use precursor::BinauralizerPrecursor;
 
 // Imports
 use crate::{
-    audio::{_convolve_ltv, AudioBuffer, AudioBufferSlice, AudioSignal, LtvFilter, StereoAudioBuf},
+    audio::{ASP, AudioBuffer, AudioBufferSlice, StereoAudioBuf},
     coordinates::{Cart3D, Shell2D, Sphere3D},
     math::{Hertz, Meters},
+    signal::{_convolve_ltv, LtvFilter},
     trajectory::Trajectory,
 };
 use itertools::Itertools;
@@ -39,7 +41,7 @@ pub struct Binauralizer {
 impl Binauralizer {
     pub fn run<A, T>(&self, src: A, trajectory: Trajectory<T>) -> StereoAudioBuf
     where
-        A: AudioSignal<1>,
+        A: ASP<1>,
         T: Into<Cart3D> + Copy,
     {
         let sampling_rate = src.sr_or_panic();

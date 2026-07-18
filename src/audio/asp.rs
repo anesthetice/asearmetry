@@ -6,13 +6,14 @@
 
 // Imports
 use crate::{
-    audio::{AudioBuffer, DiscreteSignal, MonoAudioBuf},
+    audio::{AudioBuffer, MonoAudioBuf},
     math::{Seconds, sinc},
+    signal::{DSP, DefinedLtiConvolution, TimeDomain},
 };
 use itertools::Itertools;
 use std::f32::consts::PI;
 
-pub trait AudioSignal<const C: usize>: DiscreteSignal<C> {
+pub trait ASP<const C: usize>: DSP<C, f32, TimeDomain> {
     fn duration(&self) -> Option<Seconds> {
         self.sampling_rate().map(|sr| self.len() as f64 / sr)
     }
@@ -27,7 +28,7 @@ pub trait AudioSignal<const C: usize>: DiscreteSignal<C> {
     #[allow(non_snake_case)]
     fn apply_low_pass_filter(&self, cutoff_freq: f32, M: usize) -> AudioBuffer<C>
     where
-        Self: super::DefinedLtiConvolution<C, 1, C>,
+        Self: DefinedLtiConvolution<C, 1, C, f32, TimeDomain>,
     {
         let num_taps = (M * 2) + 1;
         let f_norm = cutoff_freq / self.sr_f32_or_panic();
@@ -77,7 +78,7 @@ pub trait AudioSignal<const C: usize>: DiscreteSignal<C> {
     #[allow(non_snake_case)]
     fn apply_gaussian_filter(&self, M: usize, a: f32) -> AudioBuffer<C>
     where
-        Self: super::DefinedLtiConvolution<C, 1, C>,
+        Self: DefinedLtiConvolution<C, 1, C, f32, TimeDomain>,
     {
         assert!(M > 0);
         let M = M as i64;
@@ -99,6 +100,40 @@ pub trait AudioSignal<const C: usize>: DiscreteSignal<C> {
         self.convolve_then_crop(filter)
     }
 
+    // The resulting signal will have a length of `first.len() + second.len() - n_overlap`.
+    fn crossfade<T1, T2>(first: T1, second: T2, n_overlap: usize) -> AudioBuffer<C>
+    where
+        T1: ASP<C>,
+        T2: ASP<C>,
+    {
+        #[allow(non_snake_case)]
+        let N = n_overlap;
+
+        let (start, mid_1) = first._as_view().last_n_split(N);
+        let (mid_2, end) = second._as_view().first_n_split(N);
+
+        let transition = Self::merge(
+            mid_1.apply_enumerate(&mut |(n, x_n)| {
+                (PI * n as f32 / (2.0 * N as f32)).cos().powi(2) * x_n
+            }),
+            mid_2.apply_enumerate(&mut |(n, x_n)| {
+                (PI * n as f32 / (2.0 * N as f32)).sin().powi(2) * x_n
+            }),
+        );
+
+        Self::concatenate([start, transition.view(), end])
+    }
+
+    fn crossfade_concatenate<T, I>(input: I, n_overlap: usize) -> AudioBuffer<C>
+    where
+        T: ASP<C>,
+        I: IntoIterator<Item = T>,
+    {
+        let mut input = input.into_iter();
+        let acc = input.next().expect("Input is empty").into_owned();
+        input.fold(acc, |acc, other| Self::crossfade(acc, other, n_overlap))
+    }
+
     fn write_to<W: std::io::Write + std::io::Seek>(&self, writer: &mut W) -> anyhow::Result<()> {
         debug_assert!(
             self.get_abs_max() <= 1.0,
@@ -117,7 +152,12 @@ pub trait AudioSignal<const C: usize>: DiscreteSignal<C> {
             sample_format: hound::SampleFormat::Int,
         };
 
-        let samples_i16 = self.interleaved_samples_i16();
+        let samples_i16 = self
+            .interleaved_samples()
+            .into_iter()
+            .map(|s| (s * 32767.0).floor() as i16)
+            .collect_vec();
+
         let mut writer = hound::WavWriter::new(writer, spec)?;
         let mut efficient_writer = writer.get_i16_writer(samples_i16.len() as u32);
 
@@ -142,4 +182,4 @@ pub trait AudioSignal<const C: usize>: DiscreteSignal<C> {
     }
 }
 
-impl<const C: usize, T> AudioSignal<C> for T where T: DiscreteSignal<C> {}
+impl<const C: usize, T> ASP<C> for T where T: DSP<C, f32, TimeDomain> {}

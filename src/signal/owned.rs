@@ -4,25 +4,31 @@
  * file, You can obtain one at https://mozilla.org/MPL/2.0/.
 */
 
-use crate::{audio::AudioBuffer, math::Hertz};
+use crate::{
+    math::Hertz,
+    signal::{Domain, Sample, Signal, TimeDomain},
+};
 
-impl<const C: usize> AudioBuffer<C> {
-    pub fn new(channels: [Vec<f32>; C], sampling_rate: Option<Hertz>) -> Self {
+impl<const C: usize, S: Sample, D: Domain> Signal<C, S, D> {
+    pub fn new(channels: [Vec<S>; C], sampling_rate: Option<Hertz>) -> Self {
         Self {
             channels,
             sampling_rate,
+            _domain: D::default(),
         }
     }
     pub fn new_empty() -> Self {
         Self {
             channels: std::array::repeat(Vec::new()),
             sampling_rate: None,
+            _domain: D::default(),
         }
     }
     pub fn new_zeros(nb_samples: usize) -> Self {
         Self {
-            channels: std::array::repeat(vec![0.0; nb_samples]),
+            channels: std::array::repeat(vec![S::zero(); nb_samples]),
             sampling_rate: None,
+            _domain: D::default(),
         }
     }
     pub fn with_capacity(per_channel_capacity: usize, sampling_rate: Option<Hertz>) -> Self {
@@ -30,6 +36,7 @@ impl<const C: usize> AudioBuffer<C> {
             // Do not use `std::array::repeat` as cloning a vector will not preserve capacity
             channels: std::array::from_fn(|_| Vec::with_capacity(per_channel_capacity)),
             sampling_rate,
+            _domain: D::default(),
         }
     }
     pub fn with_sr(mut self, sampling_rate: Hertz) -> Self {
@@ -48,56 +55,60 @@ impl<const C: usize> AudioBuffer<C> {
         self.sampling_rate = sampling_rate;
         self
     }
-    pub fn cha_mut(&mut self, c: usize) -> &mut Vec<f32> {
+    pub fn cha_mut(&mut self, c: usize) -> &mut Vec<S> {
         &mut self.channels[c]
     }
-    pub(crate) fn cha_mut_uc(&mut self, c: usize) -> &mut Vec<f32> {
+    pub(crate) fn cha_mut_uc(&mut self, c: usize) -> &mut Vec<S> {
         unsafe { self.channels.get_unchecked_mut(c) }
     }
-    pub fn iter_cha_mut(&mut self) -> impl Iterator<Item = &mut Vec<f32>> {
+    pub fn iter_cha_mut(&mut self) -> impl Iterator<Item = &mut Vec<S>> {
         self.channels.iter_mut()
     }
 }
 
-impl<const C: usize> From<[Vec<f32>; C]> for AudioBuffer<C> {
-    fn from(value: [Vec<f32>; C]) -> Self {
+impl<const C: usize, S: Sample> From<[Vec<S>; C]> for Signal<C, S, TimeDomain> {
+    fn from(value: [Vec<S>; C]) -> Self {
         Self {
             channels: value,
             sampling_rate: None,
+            _domain: TimeDomain {},
         }
     }
 }
 
-impl<const C: usize> From<([Vec<f32>; C], Option<Hertz>)> for AudioBuffer<C> {
-    fn from(value: ([Vec<f32>; C], Option<Hertz>)) -> Self {
+impl<const C: usize, S: Sample> From<([Vec<S>; C], Option<Hertz>)> for Signal<C, S, TimeDomain> {
+    fn from(value: ([Vec<S>; C], Option<Hertz>)) -> Self {
         Self {
             channels: value.0,
             sampling_rate: value.1,
+            _domain: TimeDomain {},
         }
     }
 }
 
-impl<const C: usize> From<([Vec<f32>; C], Hertz)> for AudioBuffer<C> {
-    fn from(value: ([Vec<f32>; C], Hertz)) -> Self {
+impl<const C: usize, S: Sample> From<([Vec<S>; C], Hertz)> for Signal<C, S, TimeDomain> {
+    fn from(value: ([Vec<S>; C], Hertz)) -> Self {
         Self {
             channels: value.0,
             sampling_rate: Some(value.1),
+            _domain: TimeDomain {},
         }
     }
 }
 
-impl From<Vec<f32>> for AudioBuffer<1> {
-    fn from(value: Vec<f32>) -> Self {
+impl<S: Sample> From<Vec<S>> for Signal<1, S, TimeDomain> {
+    fn from(value: Vec<S>) -> Self {
         Self {
             channels: [value],
             sampling_rate: None,
+            _domain: TimeDomain {},
         }
     }
 }
 
 /*
 // Maybe switch to nightly for specialization if this is actually useful
-impl<const C: usize, U: num_traits::AsPrimitive<u32>> From<([Vec<f32>; C], U)> for AudioBuffer<C> {
+impl<const C: usize, U: num_traits::AsPrimitive<u32>> From<([Vec<f32>; C], U)> for Signal<C, S, D> {
     fn from(value: ([Vec<f32>; C], U)) -> Self {
         Self {
             channels: value.0,
@@ -108,28 +119,36 @@ impl<const C: usize, U: num_traits::AsPrimitive<u32>> From<([Vec<f32>; C], U)> f
 */
 
 #[cfg(feature = "serde")]
-impl<'de, const C: usize> serde::Deserialize<'de> for AudioBuffer<C>
+impl<'de, const C: usize, S: Sample, D: Domain> serde::Deserialize<'de> for Signal<C, S, D>
 where
-    [Vec<f32>; C]: serde::Deserialize<'de>,
+    [Vec<S>; C]: serde::Deserialize<'de>,
+    S: serde::Deserialize<'de>,
+    D: serde::Deserialize<'de>,
 {
-    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    fn deserialize<DE>(deserializer: DE) -> Result<Self, DE::Error>
     where
-        D: serde::Deserializer<'de>,
+        DE: serde::Deserializer<'de>,
     {
-        let tuple: ([Vec<f32>; C], Option<Hertz>) = serde::Deserialize::deserialize(deserializer)?;
-        Ok(AudioBuffer::from(tuple))
+        let tuple: ([Vec<S>; C], Option<Hertz>, D) = serde::Deserialize::deserialize(deserializer)?;
+        Ok(Self {
+            channels: tuple.0,
+            sampling_rate: tuple.1,
+            _domain: tuple.2,
+        })
     }
 }
 
 #[cfg(feature = "serde")]
-impl<const C: usize> serde::Serialize for AudioBuffer<C>
+impl<const C: usize, S: Sample, D: Domain> serde::Serialize for Signal<C, S, D>
 where
-    [Vec<f32>; C]: serde::Serialize,
+    [Vec<S>; C]: serde::Serialize,
+    S: serde::Serialize,
+    D: serde::Serialize,
 {
-    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+    fn serialize<SE>(&self, serializer: SE) -> Result<SE::Ok, SE::Error>
     where
-        S: serde::Serializer,
+        SE: serde::Serializer,
     {
-        (&self.channels, self.sampling_rate).serialize(serializer)
+        (&self.channels, self.sampling_rate, self._domain).serialize(serializer)
     }
 }

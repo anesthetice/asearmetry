@@ -73,7 +73,7 @@ def process_sofa_file(filepath) -> pa.Table:
     return pa.Table.from_pylist(rows, schema=schema)
 
 
-def main():
+def main2():
     output_dirpath = Path("output/")
 
     for input_dirpath, _, input_filenames in chain(Path("input/HRIRs/").walk(), Path("input/HRIRs_mannequins/").walk()):
@@ -96,7 +96,38 @@ def main():
             return
 
 
+def main():
+    """ Run the following snippet if `SingleRoomSRIR_1.1` is not available
+    import sofar as sf
+    sf.update_conventions()
+    """
 
+    filepath = "input/4_IR_A.sofa"
+    #filepath = "input/HRIRs/AKO536081622_1_processed.sofa"
+
+    sofa_data: tuple[pf.Signal, pf.Coordinates, pf.Coordinates] = pf.io.read_sofa(filepath, verify=False)
+    hrirs, source_coordinates, receiver_coordinates = sofa_data
+
+    print(f"HRIRs: {hrirs.cshape}, source_coords: {source_coordinates.cshape}, recv_coords: {receiver_coordinates.cshape}")
+    print()
+
+    for i in range(source_coordinates.cshape[0]):
+        print(f"src coord n°{i}:  ({float(source_coordinates.radius[i]):.1f}, {float(source_coordinates.azimuth[i]):.1f}, {float(source_coordinates.colatitude[i]):.1f})")
+    print()
+
+    for i in range(receiver_coordinates.cshape[0]):
+        print(f"rcv coord n°{i}:  ({float(receiver_coordinates.radius[i,0]):.1f}, {float(receiver_coordinates.azimuth[i,0]):.1f}, {float(receiver_coordinates.colatitude[i,0]):.1f})")
+    print()
+
+    output: np.ndarray = to_f32_audio(hrirs._data[5][2])
+    output_sr = hrirs._sampling_rate
+    print("sampling rate:", output_sr)
+
+    output_bytes = output.tobytes(order="C")
+    with open("output/temp.raw", "wb") as f:
+        f.write(output_bytes)
+
+    print(output[0:100])
 
 
 

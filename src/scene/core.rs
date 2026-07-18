@@ -5,7 +5,7 @@
 */
 
 use crate::{
-    audio::{AudioBuffer, AudioBufferSlice, AudioSignal},
+    audio::{ASP, AudioBuffer, AudioBufferSlice},
     coordinates::Cart3D,
     math::Seconds,
     trajectory::Trajectory,
@@ -35,15 +35,17 @@ pub struct SceneElement<'a> {
     pub(crate) color: Option<String>,
 }
 
+#[derive(Debug, Clone, Copy)]
 pub enum ActorShape {
     Square,
     Circle,
 }
 
+#[derive(Debug, Clone)]
 pub enum Modifiers {}
 
 impl Modifiers {
-    fn apply_to<A: AudioSignal<1>>(&self, audio: A) -> AudioBuffer<1> {
+    fn apply_to<A: ASP<1>>(&self, audio: A) -> AudioBuffer<1> {
         match self {
             _ => audio.into_owned(),
         }

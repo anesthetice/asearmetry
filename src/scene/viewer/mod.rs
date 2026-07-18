@@ -6,7 +6,9 @@
 
 // Imports
 use crate::coordinates::Cart3D;
+use crate::math::Hertz;
 use crate::trajectory::Trajectory;
+use cosmic_text::{Attrs, Buffer, Color as CosmicColor, FontSystem, Metrics, Shaping, SwashCache};
 use pixels::{Error, Pixels, SurfaceTexture};
 use std::sync::Arc;
 use std::time::{Duration, Instant};
@@ -21,8 +23,14 @@ use winit::window::Window;
 use tiny_skia::{Color, FillRule, Paint, PathBuilder, Pixmap, Stroke, Transform};
 
 #[bon::builder]
-pub fn build(width: Option<u32>, height: Option<u32>, trajectory: Trajectory<Cart3D>) {
+pub fn build(
+    width: Option<u32>,
+    height: Option<u32>,
+    frame_rate: Option<Hertz>,
+    trajectory: Trajectory<Cart3D>,
+) {
     let (width, height) = (width.unwrap_or(512), height.unwrap_or(512));
+    let frame_rate = frame_rate.unwrap_or(30.0);
     assert!(width != 0 && height != 0);
 
     let pixmap = Pixmap::new(width, height)
@@ -35,12 +43,15 @@ pub fn build(width: Option<u32>, height: Option<u32>, trajectory: Trajectory<Car
     let mut app = App {
         width,
         height,
-        pixmap,
+        trajectory,
         window: None,
         pixels: None,
-        trajectory,
+        frame_rate,
         frame_index: 0,
         last_frame: Instant::now(),
+        font_system: FontSystem::new(),
+        swash_cache: SwashCache::new(),
+        pixmap,
     };
 
     event_loop.run_app(&mut app).unwrap();
@@ -50,15 +61,24 @@ struct App {
     width: u32,
     height: u32,
 
-    pixmap: Pixmap,
+    trajectory: Trajectory<Cart3D>,
 
     window: Option<Arc<Window>>,
     pixels: Option<Pixels<'static>>,
-
-    trajectory: Trajectory<Cart3D>,
-
+    frame_rate: Hertz,
     frame_index: usize,
     last_frame: Instant,
+
+    // text-related elements
+    font_system: FontSystem,
+    swash_cache: SwashCache,
+
+    // tiny-skia related elements
+    pixmap: Pixmap,
+}
+
+impl App {
+    const FRAME_RATE: f64 = 30.0;
 }
 
 impl ApplicationHandler for App {
@@ -84,7 +104,7 @@ impl ApplicationHandler for App {
     }
 
     fn about_to_wait(&mut self, _event_loop: &ActiveEventLoop) {
-        let frame_time = Duration::from_secs_f64(self.trajectory.δt);
+        let frame_time = Duration::from_secs_f64(1.0 / self.frame_rate);
 
         let now = Instant::now();
 
@@ -125,6 +145,29 @@ impl ApplicationHandler for App {
                 );
 
                 draw_circle(&mut self.pixmap, cx as f32, cy as f32, 8.0);
+
+                let text = format!("t = {:.2}", self.frame_index as f64 / self.frame_rate);
+                let mut text_buffer = Buffer::new(&mut self.font_system, Metrics::new(20.0, 28.0));
+                let mut text_buffer = text_buffer.borrow_with(&mut self.font_system);
+                let attrs = Attrs::new().family(cosmic_text::Family::Monospace);
+                text_buffer.set_size(Some(100.0), Some(50.0));
+                text_buffer.set_text(&text, &attrs, Shaping::Advanced, None);
+                let text_color = CosmicColor::rgb(0x33, 0x33, 0x33);
+
+                let mut paint = Paint {
+                    anti_alias: false,
+                    ..Default::default()
+                };
+
+                text_buffer.draw(&mut self.swash_cache, text_color, |x, y, w, h, t_color| {
+                    paint.set_color_rgba8(t_color.r(), t_color.g(), t_color.b(), t_color.a());
+                    self.pixmap.fill_rect(
+                        tiny_skia::Rect::from_xywh(x as f32, y as f32, w as f32, h as f32).unwrap(),
+                        &paint,
+                        Transform::identity(),
+                        None,
+                    );
+                });
 
                 self.pixels.as_mut().unwrap().pipe(|pxs| {
                     pxs.frame_mut().copy_from_slice(self.pixmap.data());

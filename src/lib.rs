@@ -12,4 +12,5 @@ pub mod binaur;
 pub mod coordinates;
 pub mod math;
 pub mod scene;
+pub mod signal;
 pub mod trajectory;

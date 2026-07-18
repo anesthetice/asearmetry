@@ -5,73 +5,83 @@
 */
 
 // Imports
-use crate::audio::{AudioBuffer, DiscreteSignal};
+use crate::signal::{DSP, Domain, Sample, Signal};
 
-pub trait DefinedLtiConvolution<const C1: usize, const C2: usize, const C3: usize> {
-    type Output: DiscreteSignal<C3>;
+pub trait DefinedLtiConvolution<
+    const C1: usize,
+    const C2: usize,
+    const C3: usize,
+    S: Sample,
+    D: Domain,
+>
+{
+    type Output: DSP<C3, S, D>;
     fn convolve_with<T2>(&self, other: T2) -> Self::Output
     where
-        T2: DiscreteSignal<C2>;
+        T2: DSP<C2, S, D>;
 }
 
-impl<const C: usize, T1> DefinedLtiConvolution<C, C, C> for T1
+impl<const C: usize, S: Sample, D: Domain, T1> DefinedLtiConvolution<C, C, C, S, D> for T1
 where
-    T1: DiscreteSignal<C>,
+    T1: DSP<C, S, D>,
 {
-    type Output = AudioBuffer<C>;
+    type Output = Signal<C, S, D>;
     fn convolve_with<T2>(&self, other: T2) -> Self::Output
     where
-        T2: DiscreteSignal<C>,
+        T2: DSP<C, S, D>,
     {
-        AudioBuffer::new(
+        Signal::new(
             self._map_cha_enumerate(|c, samples| _convolve_lti(samples, other._cha(c))),
             Self::resolve_sampling_rate_pair(self.sampling_rate(), other.sampling_rate()),
         )
     }
 }
 
-impl<T1> DefinedLtiConvolution<1, 2, 2> for T1
+impl<T1, S: Sample, D: Domain> DefinedLtiConvolution<1, 2, 2, S, D> for T1
 where
-    T1: DiscreteSignal<1>,
+    T1: DSP<1, S, D>,
 {
-    type Output = AudioBuffer<2>;
+    type Output = Signal<2, S, D>;
     fn convolve_with<T2>(&self, other: T2) -> Self::Output
     where
-        T2: DiscreteSignal<2>,
+        T2: DSP<2, S, D>,
     {
-        AudioBuffer::new(
+        Signal::new(
             std::array::from_fn(|c| _convolve_lti(self._cha(0), other._cha(c))),
             Self::resolve_sampling_rate_pair(self.sampling_rate(), other.sampling_rate()),
         )
     }
 }
 
-impl<T1> DefinedLtiConvolution<2, 1, 2> for T1
+impl<T1, S: Sample, D: Domain> DefinedLtiConvolution<2, 1, 2, S, D> for T1
 where
-    T1: DiscreteSignal<2>,
+    T1: DSP<2, S, D>,
 {
-    type Output = AudioBuffer<2>;
+    type Output = Signal<2, S, D>;
     fn convolve_with<T2>(&self, other: T2) -> Self::Output
     where
-        T2: DiscreteSignal<1>,
+        T2: DSP<1, S, D>,
     {
         other.convolve_with(self)
     }
 }
 
-pub fn _convolve_lti(lhs: &[f32], rhs: &[f32]) -> Vec<f32> {
+pub fn _convolve_lti<V>(lhs: &[V], rhs: &[V]) -> Vec<V>
+where
+    V: Copy + num_traits::Num + num_traits::NumAssign,
+{
     if lhs.is_empty() || rhs.is_empty() {
         return Vec::with_capacity(0);
     }
 
     let max_n = lhs.len() + rhs.len() - 1;
-    let mut out: Vec<f32> = Vec::with_capacity(max_n);
+    let mut out: Vec<V> = Vec::with_capacity(max_n);
 
     unsafe {
-        let c: *mut f32 = out.as_mut_ptr();
+        let c: *mut V = out.as_mut_ptr();
 
         for n in 0..max_n {
-            let mut val: f32 = 0.0;
+            let mut val = V::zero();
 
             // 0..len(a) ∩ n-len(b)+1..n+1
             let k_range = std::ops::Range::<usize> {
@@ -80,7 +90,7 @@ pub fn _convolve_lti(lhs: &[f32], rhs: &[f32]) -> Vec<f32> {
             };
 
             for k in k_range {
-                val += lhs.get_unchecked(k) * rhs.get_unchecked(n - k);
+                val += lhs.get_unchecked(k).mul(*rhs.get_unchecked(n - k));
             }
             c.add(n).write(val);
         }

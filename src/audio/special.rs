@@ -6,8 +6,9 @@
 
 // Imports
 use crate::{
-    audio::{AudioBuffer, AudioBufferSlice, DiscreteSignal},
+    audio::{AudioBuffer, AudioBufferSlice, TimeDomain},
     math::{Hertz, Radians, Seconds},
+    signal::DSP,
 };
 use itertools::Itertools;
 use std::f64::consts::TAU;
@@ -33,6 +34,7 @@ impl MonoAudioBuf {
         AudioBuffer {
             channels: [samples],
             sampling_rate,
+            _domain: TimeDomain {},
         }
     }
 
@@ -158,12 +160,12 @@ impl MonoAudioBuf {
         Ok(Self::new_mono(mono_samples, Some(sampling_rate as f64)))
     }
 }
-
+/*
 impl StereoAudioBuf {
     pub fn from_left_right_mono<T1, T2>(left: T1, right: T2) -> Self
     where
-        T1: DiscreteSignal<1>,
-        T2: DiscreteSignal<1>,
+        T1: DSP<1>,
+        T2: DSP<1>,
     {
         let sampling_rate =
             Self::resolve_sampling_rate_pair(left.sampling_rate(), right.sampling_rate());
@@ -172,3 +174,4 @@ impl StereoAudioBuf {
         Self::new([left, right], sampling_rate)
     }
 }
+*/

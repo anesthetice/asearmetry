@@ -6,16 +6,17 @@
 
 // Imports
 use crate::{
-    audio::{AudioBuffer, AudioBufferSlice, AudioSignal, DiscreteSignal, StereoAudioBuf},
+    audio::{ASP, AudioBuffer, AudioBufferSlice, StereoAudioBuf},
     binaur::{Binauralizer, HrirProjection},
     coordinates::{Cart3D, Shell2D},
     math::{Hertz, Meters},
+    signal::DSP,
 };
-use anyhow::anyhow;
+use anyhow::{Context, anyhow};
 use itertools::Itertools;
 use polars::prelude::*;
-use rstar::PointDistance;
 use std::{collections::HashMap, path::Path};
+use tap::Pipe;
 
 #[derive(Debug, Clone)]
 pub struct BinauralizerPrecursor {
@@ -26,10 +27,18 @@ pub struct BinauralizerPrecursor {
     pub hrir_sampling_rate: Hertz,
     pub left_ear_pos: Cart3D,
     pub right_ear_pos: Cart3D,
+    pub brir_opt: Option<StereoAudioBuf>,
 }
 
 impl BinauralizerPrecursor {
     pub fn load_from_file<Q: AsRef<Path>>(filepath: Q) -> anyhow::Result<Self> {
+        let filepath = filepath.as_ref();
+
+        log::debug!(
+            "Attempting to load a BinauralizerPrecursor from the file at: {}",
+            filepath.display()
+        );
+
         let mut reader = ParquetReader::new(std::fs::File::open(filepath)?);
 
         let key_value_metadata = reader
@@ -67,29 +76,38 @@ impl BinauralizerPrecursor {
             .collect_tuple::<(f64, f64, f64)>()
             .ok_or_else(|| {
                 anyhow!(
-                    "Invalid `left_ear_position_cartesian` value, could not extract (f32; 3) tuple"
+                    "Invalid `right_ear_position_cartesian` value, could not extract (f32; 3) tuple"
                 )
             })?
             .into();
 
-        println!(
-            "left ear: {:?}\nright ear: {:?}",
-            left_ear_pos, right_ear_pos
+        log::debug!(
+            "Finished parsing dataframe metadata, got: sampling rate: {hrir_sampling_rate:.1} Hz, left ear position: {left_ear_pos}, right ear position: {right_ear_pos}"
         );
 
-        let df = reader.finish().unwrap();
+        let df = reader.finish()?;
 
         let process_float_col = |name: &str| -> anyhow::Result<Vec<f64>> {
-            let col = df.column(name)?.f64()?;
-            Ok(col.into_no_null_iter().collect_vec())
+            df.column(name)
+                .with_context(|| format!("The desired column `{name}` does not exist"))?
+                .f64()
+                .with_context(|| {
+                    format!("Expected the column `{name}` to have a `Float64` datatype")
+                })?
+                .into_no_null_iter()
+                .collect_vec()
+                .pipe(Ok)
         };
 
         let process_list_float_col = |name: &str| -> anyhow::Result<Vec<Vec<f32>>> {
-            let col = df.column(name)?.list()?;
-            Ok(col
+            df.column(name)
+                .with_context(|| format!("The desired column `{name}` does not exist"))?
+                .list()
+                .with_context(|| format!("Expected the column `{name}` to have a `List` datatype"))?
                 .into_iter()
                 .map(|s| s.unwrap().f32().unwrap().into_no_null_iter().collect_vec())
-                .collect_vec())
+                .collect_vec()
+                .pipe(Ok)
         };
 
         let src_radius_vec = process_float_col("src_radius")?;
@@ -129,7 +147,10 @@ impl BinauralizerPrecursor {
             .map(|(azimuth, zenith)| Shell2D::new(azimuth, zenith).clamp_angles())
             .collect_vec();
 
-        println!("loaded in {} HRIRs", hrir_vec.len());
+        log::debug!(
+            "Finished loading `BinauralizerPrecursor`, with {} HRIRs",
+            hrir_vec.len()
+        );
 
         Ok(BinauralizerPrecursor {
             hrir_vec,
@@ -139,6 +160,7 @@ impl BinauralizerPrecursor {
             hrir_sampling_rate,
             left_ear_pos,
             right_ear_pos,
+            brir_opt: None,
         })
     }
 
@@ -206,7 +228,7 @@ impl BinauralizerPrecursor {
             let rtree_elements = Shell2D::generate_fib_lattice(4096)
                 .into_iter()
                 .map(|new_pos| {
-                    println!("desired position: {}", new_pos);
+                    //println!("desired position: {}", new_pos);
                     let mut total_dist = 0.0;
                     let mut dists = Vec::with_capacity(N_NEAREST);
                     let mut hrirs = Vec::with_capacity(N_NEAREST);
@@ -216,13 +238,13 @@ impl BinauralizerPrecursor {
                         .take(N_NEAREST)
                         .for_each(|gwd| {
                             let dist = gwd.geom().dist(new_pos);
-                            println!("• close to: {}, with a dist of: {}", gwd.geom(), dist);
+                            //println!("• close to: {}, with a dist of: {}", gwd.geom(), dist);
                             total_dist += dist;
                             dists.push(dist);
                             hrirs.push(gwd.data.view());
                         });
 
-                    println!();
+                    //println!();
 
                     assert!(total_dist > 0.0);
 

@@ -12,4 +12,5 @@ mod core;
 mod viewer;
 
 // Exports
+#[cfg(feature = "viewer")]
 pub use viewer::build;

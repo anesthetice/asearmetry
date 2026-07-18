@@ -4,25 +4,42 @@
 #![allow(mixed_script_confusables)]
 #![allow(unused)]
 
-// Modules
-mod misc;
-
-// Imports
 use asearmetry::{
-    audio::{
-        AudioBuffer, AudioBufferSlice, AudioSignal, DiscreteSignal, MonoAudioBuf, MonoAudioBufSlice,
-    },
+    audio::{ASP, AudioBuffer, AudioBufferSlice, MonoAudioBuf, MonoAudioBufSlice},
     binaur::{Binauralizer, BinauralizerPrecursor},
     coordinates::{Cart3D, Shell2D, Sphere3D},
     math::{Radians, Seconds},
+    signal::DSP,
     trajectory::{self, Trajectory},
 };
 use itertools::Itertools;
+use petgraph::graph::NodeIndex;
 use rand::RngExt;
 use std::{f64::consts::PI, ops::Add};
 use tap::Tap;
 
 fn main() -> anyhow::Result<()> {
+    env_logger::Builder::from_env(env_logger::Env::default().default_filter_or("info")).init();
+
+    let mut raw_data = std::fs::read("sofa_conversion/output/temp.raw")?;
+
+    let signal = unsafe {
+        raw_data
+            .as_chunks_unchecked::<4>()
+            .iter()
+            .map(|le_bytes| f32::from_le_bytes(*le_bytes))
+            .collect_vec()
+    };
+
+    signal.iter().take(5).for_each(|s| println!("{s}"));
+
+    return Ok(());
+
+    let binaur = BinauralizerPrecursor::load_from_file(
+        "sofa_conversion/output/AKO536081622_1_processed.asear.hrtf.parquet",
+    )?
+    .into_binauralizer();
+
     asearmetry::scene::build()
         .trajectory(
             simple_circle_trajectory(10.0)

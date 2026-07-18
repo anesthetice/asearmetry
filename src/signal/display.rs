@@ -4,45 +4,46 @@
  * file, You can obtain one at https://mozilla.org/MPL/2.0/.
 */
 
-use crate::audio::{AudioBuffer, AudioBufferSlice, DiscreteSignal};
+use crate::signal::{DSP, Domain, Signal, SignalSlice};
+use core::fmt::Write;
 use indoc::writedoc;
 use itertools::Itertools;
-use std::fmt::Write;
 
-impl<const C: usize> std::fmt::Debug for AudioBuffer<C> {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        display_debug_impl("AudioBuffer", self, f)
+impl<const C: usize, D: Domain> core::fmt::Debug for Signal<C, f32, D> {
+    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+        display_debug_impl("Signal", self, f)
     }
 }
 
-impl<const C: usize> std::fmt::Display for AudioBuffer<C> {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        std::fmt::Debug::fmt(&self, f)
+impl<const C: usize, D: Domain> core::fmt::Display for Signal<C, f32, D> {
+    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+        core::fmt::Debug::fmt(&self, f)
     }
 }
 
-impl<const C: usize> std::fmt::Debug for AudioBufferSlice<'_, C> {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        display_debug_impl("AudioBufferSlice", self, f)
+impl<const C: usize, D: Domain> core::fmt::Debug for SignalSlice<'_, C, f32, D> {
+    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+        display_debug_impl("SignalSlice", self, f)
     }
 }
 
-impl<const C: usize> std::fmt::Display for AudioBufferSlice<'_, C> {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        std::fmt::Debug::fmt(&self, f)
+impl<const C: usize, D: Domain> core::fmt::Display for SignalSlice<'_, C, f32, D> {
+    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+        core::fmt::Debug::fmt(&self, f)
     }
 }
 
-fn display_debug_impl<const C: usize, T: DiscreteSignal<C>>(
+fn display_debug_impl<const C: usize, D: Domain, T: DSP<C, f32, D>>(
     name: &str,
     s: T,
-    f: &mut std::fmt::Formatter<'_>,
-) -> std::fmt::Result {
+    f: &mut core::fmt::Formatter<'_>,
+) -> core::fmt::Result {
     const CHUNK_SIZE: usize = 10;
     writedoc! {
     f,
     "
         {name} {{
+            domain: {dom}
             sampling rate: {sr}
             number of channels: {C}
             samples per channel: {len}
@@ -50,6 +51,7 @@ fn display_debug_impl<const C: usize, T: DiscreteSignal<C>>(
         {channels}
         }}
     ",
+    dom = s.domain(),
     sr = s.sampling_rate().map_or_else(|| "None".to_string(), |x| x.to_string()),
     len = s.len(),
     channels = s._iter_cha().enumerate().map(|(i, cha)| {
@@ -71,7 +73,7 @@ fn display_debug_impl<const C: usize, T: DiscreteSignal<C>>(
                     .for_each(|chunk| {
                         out.push_str(spine);
                         for x in chunk.iter() {
-                            if x.abs() > 0.001 || x.abs() == 0.0 {
+                            if x.abs() > 0.001 || x.abs() == 0.0  {
                                 write!(&mut out, "{x:.3}, ").unwrap();
                             } else {
                                 write!(&mut out, "{x:.1E}, ").unwrap();

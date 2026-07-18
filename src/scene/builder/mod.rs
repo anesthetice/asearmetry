@@ -4,14 +4,22 @@
  * file, You can obtain one at https://mozilla.org/MPL/2.0/.
 */
 
-use petgraph::Directed;
+// Modules
+mod action;
 
+// Imports
 #[cfg(feature = "viewer")]
 use crate::scene::core::ActorShape;
-use crate::{audio::AudioBufferSlice, coordinates::Cart3D, math::Seconds, trajectory::Trajectory};
+use crate::{
+    audio::AudioBufferSlice, coordinates::Cart3D, math::Seconds, scene::core::Modifiers,
+    trajectory::Trajectory,
+};
+use action::Action;
+use petgraph::Directed;
 
 pub struct SceneBuilder<'a> {
     inner: petgraph::Graph<Actor<'a>, (), Directed>,
+    root_idx: petgraph::graph::NodeIndices,
 }
 
 pub enum SceneBuilderElement<'a> {
@@ -20,7 +28,8 @@ pub enum SceneBuilderElement<'a> {
 }
 
 pub struct Actor<'a> {
-    pub(crate) actions: Vec<(AudioBufferSlice<'a, 1>, Trajectory<Cart3D>)>,
+    pub(crate) source: AudioBufferSlice<'a, 1>,
+    pub(crate) actions: petgraph::Graph<Action, (), Directed>,
 
     /// The name of the actor, should be kept short, for debugging or visualization purposes.
     pub(crate) name: Option<String>,
