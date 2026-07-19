@@ -34,25 +34,39 @@ pub fn binaur_plot() -> anyhow::Result<()> {
     let mut plots: Vec<Vec<Plot>> = Vec::new();
     let mut layouts: Vec<Layout> = Vec::new();
     for pos in pos_array {
-        let raw_plot = binaur_raw.get_hrir_both(pos).slice(0..80).plot(Some(1.5));
-        let raw_layout = Layout::auto_from_plots(&raw_plot).with_title(format!("Raw @ {pos}"));
+        let (raw_plot, raw_layout) = binaur_raw
+            .get_hrir_both(pos)
+            .slice(0..80)
+            .plot_builder()
+            .plot_line_stroke_width(1.5)
+            .layout_title(format!("Raw @ {pos}"))
+            .build()
+            .plot_and_layout();
         plots.push(raw_plot);
         layouts.push(raw_layout);
 
-        let pro_plot = binaur_pro.get_hrir_both(pos).slice(0..80).plot(Some(1.5));
-        let pro_layout = Layout::auto_from_plots(&pro_plot).with_title(format!("Pro @ {pos}"));
+        let (pro_plot, pro_layout) = binaur_pro
+            .get_hrir_both(pos)
+            .slice(0..80)
+            .plot_builder()
+            .plot_line_stroke_width(1.5)
+            .layout_title(format!("Pro @ {pos}"))
+            .build()
+            .plot_and_layout();
         plots.push(pro_plot);
         layouts.push(pro_layout);
 
         let hrir = binaur_raw.get_hrir_both(pos);
-        let smooth_plot = hrir
+        let (smooth_plot, smooth_layout) = hrir
             .abs()
             .apply_gaussian_filter(10, 0.05)
             .normalize_to(hrir.get_abs_max())
             .slice(0..80)
-            .plot(Some(1.5));
-        let smooth_layout =
-            Layout::auto_from_plots(&smooth_plot).with_title(format!("Smooth @ {pos}"));
+            .plot_builder()
+            .plot_line_stroke_width(1.5)
+            .layout_title(format!("Smooth @ {pos}"))
+            .build()
+            .plot_and_layout();
         plots.push(smooth_plot);
         layouts.push(smooth_layout);
     }

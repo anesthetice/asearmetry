@@ -45,17 +45,18 @@ pub fn check_resampling() {
     let sr2_17 = s2.resample(250.0, 17);
     let sr2_pure = s2.resample_pure(250.0);
 
+    #[rustfmt::skip]
     let plots = vec![
-        s1.plot(Some(2.5)),
-        sr1_3.plot(Some(2.5)),
-        sr1_7.plot(Some(2.5)),
-        sr1_17.plot(Some(2.5)),
-        sr1_pure.plot(Some(2.5)),
-        s2.plot(Some(2.5)),
-        sr2_3.plot(Some(2.5)),
-        sr2_7.plot(Some(2.5)),
-        sr2_17.plot(Some(2.5)),
-        sr2_pure.plot(Some(2.5)),
+        s1.plot_builder().plot_line_stroke_width(2.5).build().plot(),
+        sr1_3.plot_builder().plot_line_stroke_width(2.5).build().plot(),
+        sr1_7.plot_builder().plot_line_stroke_width(2.5).build().plot(),
+        sr1_17.plot_builder().plot_line_stroke_width(2.5).build().plot(),
+        sr1_pure.plot_builder().plot_line_stroke_width(2.5).build().plot(),
+        s2.plot_builder().plot_line_stroke_width(2.5).build().plot(),
+        sr2_3.plot_builder().plot_line_stroke_width(2.5).build().plot(),
+        sr2_7.plot_builder().plot_line_stroke_width(2.5).build().plot(),
+        sr2_17.plot_builder().plot_line_stroke_width(2.5).build().plot(),
+        sr2_pure.plot_builder().plot_line_stroke_width(2.5).build().plot(),
     ];
 
     let layouts = plots
@@ -67,13 +68,13 @@ pub fn check_resampling() {
                 1 => "resampled signal: f₂ = 210 Hz, M=3",
                 2 => "resampled signal: f₂ = 210 Hz, M=7",
                 3 => "resampled signal: f₂ = 210 Hz, M=17",
-                4 => "resampled signal: f₂ = 210 Hz, M=+∞",
+                4 => "resampled signal: f₂ = 210 Hz, M→+∞",
                 //
                 5 => "original signal: f₁ = 100 Hz",
                 6 => "resampled signal: f₂ = 250 Hz, M=3",
                 7 => "resampled signal: f₂ = 250 Hz, M=7",
                 8 => "resampled signal: f₂ = 250 Hz, M=17",
-                9 => "resampled signal: f₂ = 250 Hz, M=+∞",
+                9 => "resampled signal: f₂ = 250 Hz, M→+∞",
                 //
                 _ => unreachable!(),
             };

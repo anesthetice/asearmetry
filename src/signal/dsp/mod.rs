@@ -607,44 +607,133 @@ pub trait DSP<const C: usize, S: Sample, D: Domain>: Clone + DSPUtils<C, S, D> {
         out
     }
 
-    /*
     #[cfg(feature = "plot")]
-    fn plot(&self, line_stroke_width: Option<f64>) -> Vec<kuva::prelude::Plot> {
-        use kuva::prelude::*;
+    fn plot_builder(&self) -> plot_impl::SignalPlotterBuilder
+    where
+        S: AsPrimitive<f64>,
+    {
+        let points = self._map_cha(|cha| {
+            cha.iter()
+                .enumerate()
+                .map(|(i, sam)| (i as f64, sam.as_()))
+                .collect_vec()
+        });
 
-        let line_stroke_width = line_stroke_width.unwrap_or(1.0);
-
-        self._map_cha_enumerate(|i, cha| {
-            let legend: String = match (i, C) {
-                (0, 2) => "channel 0 (left ear)".to_string(),
-                (1, 2) => "channel 1 (right ear)".to_string(),
-                (i, _) => format!("channel {i}"),
-            };
-            let palette = Palette::wong();
-            let color = &palette.colors()[i % palette.len()];
-
-            if let Some(sr) = self.sampling_rate() {
-                LinePlot::new()
-                    .with_data(
-                        cha.iter()
-                            .enumerate()
-                            .map(|(x, y)| (x as f64 / sr, *y as f64)),
-                    )
-                    .with_color(color)
-                    .with_stroke_width(line_stroke_width)
-                    .with_legend(legend)
-            } else {
-                LinePlot::new()
-                    .with_data(cha.iter().enumerate().map(|(x, y)| (x as f64, *y as f64)))
-                    .with_color(color)
-                    .with_legend(legend)
-            }
-        })
-        .into_iter()
-        .map(Plot::from)
-        .collect()
+        plot_impl::SignalPlotter::builder(points.to_vec(), self.sr(), self.domain().to_string())
     }
-    */
+}
+
+#[cfg(feature = "plot")]
+mod plot_impl {
+    use core::ops::DivAssign;
+    use kuva::prelude::*;
+    use std::io::Write;
+    use tap::{Pipe, Tap};
+
+    #[derive(bon::Builder)]
+    pub struct SignalPlotter {
+        #[builder(start_fn)]
+        points: Vec<Vec<(f64, f64)>>,
+        #[builder(start_fn)]
+        sampling_rate: Option<f64>,
+        #[builder(start_fn)]
+        domain_str: String,
+
+        #[builder(default = false)]
+        force_discrete_x_axis: bool,
+
+        #[builder(default = Palette::wong())]
+        plot_palette: Palette,
+        #[builder(default = 1.0_f64)]
+        plot_line_stroke_width: f64,
+        #[builder(with = |f: impl FnMut(LinePlot) -> LinePlot + 'static| {Box::new(f)})]
+        plot_extra: Option<Box<dyn FnMut(LinePlot) -> LinePlot>>,
+
+        #[builder(into)]
+        layout_title: Option<String>,
+        #[builder(with = |f: impl FnMut(Layout) -> Layout + 'static| {Box::new(f)})]
+        layout_extra: Option<Box<dyn FnMut(Layout) -> Layout>>,
+    }
+
+    impl SignalPlotter {
+        pub fn plot(mut self) -> Vec<Plot> {
+            let n_channels = self.points.len();
+
+            if let Some(sr) = self.sampling_rate
+                && !self.force_discrete_x_axis
+            {
+                self.points
+                    .iter_mut()
+                    .for_each(|points| points.iter_mut().for_each(|(x, _)| x.div_assign(sr)));
+            }
+
+            self.points
+                .into_iter()
+                .enumerate()
+                .map(|(i, points)| {
+                    let legend: String = match (i, n_channels) {
+                        (0, 2) => "channel 0 (left ear)".to_string(),
+                        (1, 2) => "channel 1 (right ear)".to_string(),
+                        (i, _) => format!("channel {i}"),
+                    };
+                    let color = &self.plot_palette.colors()[i % self.plot_palette.len()];
+
+                    LinePlot::new()
+                        .with_data(points)
+                        .with_color(color)
+                        .with_legend(legend)
+                        .with_stroke_width(self.plot_line_stroke_width)
+                        .pipe(|lp| {
+                            if let Some(extra_fn) = self.plot_extra.as_mut() {
+                                extra_fn(lp)
+                            } else {
+                                lp
+                            }
+                        })
+                })
+                .map(Plot::from)
+                .collect()
+        }
+
+        pub fn plot_and_layout(mut self) -> (Vec<Plot>, Layout) {
+            let title = self.layout_title.as_ref().cloned().unwrap_or_else(|| {
+                format!(
+                    "Signal ({n_channels} channels, {dom} domain)",
+                    n_channels = self.points.len(),
+                    dom = self.domain_str
+                )
+            });
+            let mut layout_extra_fn = self.layout_extra.take();
+
+            let plot = self.plot();
+
+            let layout = Layout::auto_from_plots(&plot).with_title(title).pipe(|la| {
+                if let Some(extra_fn) = layout_extra_fn.as_mut() {
+                    extra_fn(la)
+                } else {
+                    la
+                }
+            });
+
+            (plot, layout)
+        }
+
+        pub fn direct_to_file<Q: AsRef<std::path::Path>>(self, fp: Q) -> anyhow::Result<()> {
+            let (plot, layout) = self.plot_and_layout();
+            let data = render_to_svg(plot, layout);
+
+            let mut file = std::fs::OpenOptions::new()
+                .create(true)
+                .write(true)
+                .truncate(true)
+                .open(fp)?;
+
+            file.write_all(data.as_bytes())?;
+            file.sync_all()?;
+
+            Ok(())
+        }
+    }
 }
 
 impl<const C: usize, S: Sample, D: Domain> DSP<C, S, D> for Signal<C, S, D> {
