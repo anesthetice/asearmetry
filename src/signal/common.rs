@@ -97,6 +97,7 @@ impl<const C: usize, S: Sample, D: Domain> Signal<C, S, D> {
             .chain(rhs)
             .collect()
     }
+    #[allow(clippy::complexity)]
     pub fn as_blocks_strict(
         &self,
         block_size: usize,
@@ -202,6 +203,7 @@ impl<'data, const C: usize, S: Sample, D: Domain> SignalSlice<'data, C, S, D> {
             .chain(rhs)
             .collect()
     }
+    #[allow(clippy::complexity)]
     pub fn as_blocks_strict(
         &self,
         block_size: usize,

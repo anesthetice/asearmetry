@@ -6,7 +6,7 @@
 
 // Imports
 use crate::{
-    audio::{ASP, AudioBuffer, AudioBufferSlice, StereoAudioBuf},
+    audio::{ASP, AudioBuffer, StereoAudioBuf},
     binaur::{Binauralizer, HrirProjection},
     coordinates::{Cart3D, Shell2D},
     math::{Hertz, Meters},

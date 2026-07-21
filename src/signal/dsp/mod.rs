@@ -7,23 +7,26 @@
 // Modules
 mod conv_lti; // linear time-invariant convolution
 mod conv_ltv; // linear time-variant convolution
+mod fourier; // DFT, FFT, IDFT, IFFT
 mod utils;
 
 // Exports
 pub use conv_lti::_convolve_lti;
 pub use conv_ltv::{_convolve_ltv, LtvFilter};
+pub use fourier::{_dft, _dft_rayon, _fft, _idft, _idft_rayon, _ifft};
 
 pub(crate) use conv_lti::DefinedLtiConvolution;
 pub(crate) use conv_ltv::DefinedLtvConvolution;
-use num_traits::AsPrimitive;
 pub(crate) use utils::DSPUtils;
 
 // Imports
 use crate::{
     math::{Hertz, Seconds, sinc},
-    signal::{Domain, Sample, Signal, SignalSlice},
+    signal::{Domain, FreqDomain, Sample, Signal, SignalSlice, TimeDomain},
 };
 use itertools::Itertools;
+use num_complex::Complex32;
+use num_traits::AsPrimitive;
 use std::{f32::consts::PI as PI_F32, f64::consts::PI as PI_F64};
 
 /// Digital Signal Processing trait.
@@ -398,7 +401,7 @@ pub trait DSP<const C: usize, S: Sample, D: Domain>: Clone + DSPUtils<C, S, D> {
                 //let n1_start = (n2 as f64 * f1 / f2 - sinc_arg_abs_max).floor().max(0.0) as usize;
                 //let n1_stop = (1 + (n2 as f64 * f1 / f2 + sinc_arg_abs_max).ceil() as usize).min(x_f1_len);
 
-                let n1_center_ideal = (n2 as f64 * f1 / f2) as f64;
+                let n1_center_ideal = n2 as f64 * f1 / f2;
                 let n1_start = (n1_center_ideal.round() as usize).saturating_sub(M);
                 let n1_stop = (n1_center_ideal.round() as usize + M + 1).min(x_f1_len);
 
@@ -595,6 +598,63 @@ pub trait DSP<const C: usize, S: Sample, D: Domain>: Clone + DSPUtils<C, S, D> {
         self.convolve_ltv_with(h)
     }
 
+    fn dft(&self) -> Signal<C, Complex32, FreqDomain>
+    where
+        S: Sample<Inner = f32>,
+        D: Domain<Inner = TimeDomain>,
+    {
+        let n_time_samples = self.len();
+        Signal {
+            channels: self._map_cha(|cha| {
+                let cha = cha.iter().copied().map(|s| s.into_inner()).collect_vec();
+                fourier::_fft(cha)
+            }),
+            sampling_rate: self.sampling_rate(),
+            _domain: FreqDomain {
+                N_ts: n_time_samples,
+            },
+        }
+    }
+
+    fn idft(&self) -> Signal<C, f32, TimeDomain>
+    where
+        S: Sample<Inner = Complex32>,
+        D: Domain<Inner = FreqDomain>,
+    {
+        Signal {
+            channels: self._map_cha(|cha| {
+                let cha = cha.iter().copied().map(|s| s.into_inner()).collect_vec();
+                fourier::_ifft(cha, self.domain().into_inner().N_ts)
+            }),
+            sampling_rate: self.sampling_rate(),
+            _domain: TimeDomain {},
+        }
+    }
+
+    fn complex_norm(self) -> Signal<C, S::Real, D>
+    where
+        S: num_complex::ComplexFloat,
+        <S as num_complex::ComplexFloat>::Real: Sample,
+    {
+        Signal {
+            channels: self._map_cha(|cha| cha.iter().copied().map(|a| a.abs()).collect()),
+            sampling_rate: self.sampling_rate(),
+            _domain: self.domain(),
+        }
+    }
+
+    fn complex_arg(self) -> Signal<C, S::Real, D>
+    where
+        S: num_complex::ComplexFloat,
+        <S as num_complex::ComplexFloat>::Real: Sample,
+    {
+        Signal {
+            channels: self._map_cha(|cha| cha.iter().copied().map(|a| a.arg()).collect()),
+            sampling_rate: self.sampling_rate(),
+            _domain: self.domain(),
+        }
+    }
+
     fn interleaved_samples(&self) -> Vec<S> {
         let size = self.len() * C;
         let mut out: Vec<S> = vec![S::zero(); size];
@@ -619,16 +679,17 @@ pub trait DSP<const C: usize, S: Sample, D: Domain>: Clone + DSPUtils<C, S, D> {
                 .collect_vec()
         });
 
-        plot_impl::SignalPlotter::builder(points.to_vec(), self.sr(), self.domain().to_string())
+        plot_impl::SignalPlotter::builder(points.to_vec(), self.sr(), self.domain().into())
     }
 }
 
 #[cfg(feature = "plot")]
 mod plot_impl {
+    use crate::signal::AnyDomain;
     use core::ops::DivAssign;
     use kuva::prelude::*;
     use std::io::Write;
-    use tap::{Pipe, Tap};
+    use tap::Pipe;
 
     #[derive(bon::Builder)]
     pub struct SignalPlotter {
@@ -637,7 +698,7 @@ mod plot_impl {
         #[builder(start_fn)]
         sampling_rate: Option<f64>,
         #[builder(start_fn)]
-        domain_str: String,
+        domain: AnyDomain,
 
         #[builder(default = false)]
         force_discrete_x_axis: bool,
@@ -661,10 +722,26 @@ mod plot_impl {
 
             if let Some(sr) = self.sampling_rate
                 && !self.force_discrete_x_axis
+                && matches!(self.domain, AnyDomain::Time(_))
             {
                 self.points
                     .iter_mut()
                     .for_each(|points| points.iter_mut().for_each(|(x, _)| x.div_assign(sr)));
+            }
+
+            if let Some(f_s) = self.sampling_rate
+                && !self.force_discrete_x_axis
+                && let AnyDomain::Freq(freq_domain) = self.domain
+            {
+                #[allow(non_snake_case)]
+                let Δf = f_s / freq_domain.N_ts as f64;
+                let mut cummulative_sum = 0.0;
+                self.points.iter_mut().for_each(|points| {
+                    points.iter_mut().for_each(|(x, _)| {
+                        *x = cummulative_sum;
+                        cummulative_sum += Δf;
+                    })
+                });
             }
 
             self.points
@@ -700,20 +777,35 @@ mod plot_impl {
                 format!(
                     "Signal ({n_channels} channels, {dom} domain)",
                     n_channels = self.points.len(),
-                    dom = self.domain_str
+                    dom = self.domain
                 )
             });
+
+            let x_label = match (
+                self.sampling_rate.is_some(),
+                self.domain,
+                self.force_discrete_x_axis,
+            ) {
+                (true, AnyDomain::Time(_), false) => "time [s]",
+                (true, AnyDomain::Freq(_), false) => "frequency [Hz]",
+                _ => "sample",
+            };
+
             let mut layout_extra_fn = self.layout_extra.take();
 
             let plot = self.plot();
 
-            let layout = Layout::auto_from_plots(&plot).with_title(title).pipe(|la| {
-                if let Some(extra_fn) = layout_extra_fn.as_mut() {
-                    extra_fn(la)
-                } else {
-                    la
-                }
-            });
+            let layout = Layout::auto_from_plots(&plot)
+                .with_title(title)
+                .with_x_label(x_label)
+                .with_y_label("amplitude")
+                .pipe(|la| {
+                    if let Some(extra_fn) = layout_extra_fn.as_mut() {
+                        extra_fn(la)
+                    } else {
+                        la
+                    }
+                });
 
             (plot, layout)
         }
