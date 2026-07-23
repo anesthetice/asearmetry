@@ -27,7 +27,7 @@ use crate::{
 use itertools::Itertools;
 use num_complex::Complex32;
 use num_traits::AsPrimitive;
-use std::{f32::consts::PI as PI_F32, f64::consts::PI as PI_F64};
+use std::{f32::consts::PI as PI_F32, f64::consts::PI as PI_F64, io::ErrorKind::Other};
 
 /// Digital Signal Processing trait.
 #[allow(private_bounds)]
@@ -45,14 +45,6 @@ pub trait DSP<const C: usize, S: Sample, D: Domain>: Clone + DSPUtils<C, S, D> {
         // Checks that all channels have the same length
         debug_assert!(self._map_cha(|cha| cha.len()).iter().all_equal());
         self._chas().first().map(|cha| cha.len()).unwrap_or(0)
-    }
-
-    fn lens(&self) -> [usize; C] {
-        self._map_cha(|cha| cha.len())
-    }
-
-    fn max_len(&self) -> usize {
-        self.lens().into_iter().max().unwrap_or(0)
     }
 
     fn sampling_rate_f32(&self) -> Option<f32> {
@@ -206,7 +198,7 @@ pub trait DSP<const C: usize, S: Sample, D: Domain>: Clone + DSPUtils<C, S, D> {
         T: DSP<C, S, D>,
     {
         let sampling_rate = Self::resolve_sampling_rate_pair(self.sr(), other.sr());
-        let total_length = self.max_len().max(offset + other.max_len());
+        let total_length = self.len().max(offset + other.len());
 
         let mut acc = self.pad_right_to_len(total_length);
 
@@ -480,6 +472,23 @@ pub trait DSP<const C: usize, S: Sample, D: Domain>: Clone + DSPUtils<C, S, D> {
         out
     }
 
+    /// Negative integer -> roll to the left, positive integer -> roll to the right.
+    fn shift(self, by: [isize; C], replacement: [S; C]) -> Signal<C, S, D> {
+        let len = self.len();
+        let mut out = self.into_owned();
+        itertools::izip!(out.channels.iter_mut(), by, replacement).for_each(|(cha, by, repl)| {
+            if by < 0 {
+                cha.drain(0..by.unsigned_abs());
+                cha.resize(len, repl);
+            } else if by > 0 {
+                let mut vec = vec![repl; by as usize];
+                vec.extend_from_slice(&cha[0..len.saturating_sub(by as usize)]);
+                *cha = vec;
+            }
+        });
+        out
+    }
+
     fn pad_right(self, by: usize) -> Signal<C, S, D> {
         let mut buf = self.into_owned();
         buf.iter_cha_mut()
@@ -567,6 +576,25 @@ pub trait DSP<const C: usize, S: Sample, D: Domain>: Clone + DSPUtils<C, S, D> {
         self.convolve_with(h)
     }
 
+    fn mul(self, rhs: Self) -> Signal<C, S, D> {
+        let (mut out, other) = if self.len() <= rhs.len() {
+            (self.into_owned(), rhs._as_view())
+        } else {
+            (rhs.into_owned(), self._as_view())
+        };
+
+        out.iter_cha_mut()
+            .zip(other.iter_cha())
+            .for_each(|(cha_mut, cha_other)| {
+                cha_mut
+                    .iter_mut()
+                    .zip(cha_other)
+                    .for_each(|(s, s_)| s.mul_assign(*s_));
+            });
+
+        out
+    }
+
     /// Similar to using `numpy.convolve(a, v, mode='same')`, we keep the output "aligned" with
     /// our input; left-biased in the case where the filter `h` has an even length.
     fn convolve_then_crop<T, const C2: usize, const C3: usize>(&self, h: T) -> Signal<C3, S, D>
@@ -598,24 +626,34 @@ pub trait DSP<const C: usize, S: Sample, D: Domain>: Clone + DSPUtils<C, S, D> {
         self.convolve_ltv_with(h)
     }
 
+    /// Computes the Discrete Fourier Transform (DFT) of the signal.
+    ///
+    /// Note that for the sake of simplicity the entire DFT will be kept instead
+    /// of it being truncated to a length of ⌊N/2⌋+1 as one might expect when working
+    /// with signals in the time domain which only contain real values.
     fn dft(&self) -> Signal<C, Complex32, FreqDomain>
     where
         S: Sample<Inner = f32>,
         D: Domain<Inner = TimeDomain>,
     {
-        let n_time_samples = self.len();
         Signal {
             channels: self._map_cha(|cha| {
-                let cha = cha.iter().copied().map(|s| s.into_inner()).collect_vec();
+                let cha = cha.iter().copied().map(S::into_inner).collect_vec();
                 fourier::_fft(cha)
             }),
             sampling_rate: self.sampling_rate(),
-            _domain: FreqDomain {
-                N_ts: n_time_samples,
-            },
+            _domain: FreqDomain {},
         }
     }
 
+    /// Computes the Inverse Discrete Fourier Transform (IDFT) of the signal.
+    ///
+    /// Expects `self` to contain the entire DFT of length N, identical
+    /// to the length of the signal in the time domain. Instead of what
+    /// one may be accustomed to, for transforms where the signal in the
+    /// time domain only contains real values, wherein only ⌊N/2⌋+1 of
+    /// the frequency samples are kept (as F[m] = F*[N-m] for m ∈ {0, …, N-1}).
+    #[allow(non_snake_case)]
     fn idft(&self) -> Signal<C, f32, TimeDomain>
     where
         S: Sample<Inner = Complex32>,
@@ -623,8 +661,26 @@ pub trait DSP<const C: usize, S: Sample, D: Domain>: Clone + DSPUtils<C, S, D> {
     {
         Signal {
             channels: self._map_cha(|cha| {
-                let cha = cha.iter().copied().map(|s| s.into_inner()).collect_vec();
-                fourier::_ifft(cha, self.domain().into_inner().N_ts)
+                let N_t = cha.len();
+                let N_f = (N_t / 2) + 1;
+                let cha = cha[0..N_f].iter().copied().map(S::into_inner).collect_vec();
+                fourier::_ifft(cha, N_t)
+            }),
+            sampling_rate: self.sampling_rate(),
+            _domain: TimeDomain {},
+        }
+    }
+
+    #[allow(non_snake_case)]
+    fn idft_from_halved(&self, N: usize) -> Signal<C, f32, TimeDomain>
+    where
+        S: Sample<Inner = Complex32>,
+        D: Domain<Inner = FreqDomain>,
+    {
+        Signal {
+            channels: self._map_cha(|cha| {
+                let cha = cha.iter().copied().map(S::into_inner).collect_vec();
+                fourier::_ifft(cha, N)
             }),
             sampling_rate: self.sampling_rate(),
             _domain: TimeDomain {},
@@ -720,6 +776,13 @@ mod plot_impl {
         pub fn plot(mut self) -> Vec<Plot> {
             let n_channels = self.points.len();
 
+            // Go from full representation of the DFT to the halved one.
+            if matches!(self.domain, AnyDomain::Freq(_)) {
+                self.points
+                    .iter_mut()
+                    .for_each(|points| points.truncate((points.len() / 2) + 1));
+            }
+
             if let Some(sr) = self.sampling_rate
                 && !self.force_discrete_x_axis
                 && matches!(self.domain, AnyDomain::Time(_))
@@ -731,10 +794,12 @@ mod plot_impl {
 
             if let Some(f_s) = self.sampling_rate
                 && !self.force_discrete_x_axis
-                && let AnyDomain::Freq(freq_domain) = self.domain
+                && matches!(self.domain, AnyDomain::Freq(_))
             {
                 #[allow(non_snake_case)]
-                let Δf = f_s / freq_domain.N_ts as f64;
+                let N_ts = 2 * self.points.first().map(Vec::len).unwrap() + 1;
+                #[allow(non_snake_case)]
+                let Δf = f_s / N_ts as f64;
                 let mut cummulative_sum = 0.0;
                 self.points.iter_mut().for_each(|points| {
                     points.iter_mut().for_each(|(x, _)| {

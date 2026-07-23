@@ -6,7 +6,7 @@
 
 use crate::{
     math::Hertz,
-    signal::{Domain, Sample, Signal, TimeDomain},
+    signal::{Domain, FreqDomain, Sample, Signal, TimeDomain},
 };
 
 impl<const C: usize, S: Sample, D: Domain> Signal<C, S, D> {
@@ -55,14 +55,46 @@ impl<const C: usize, S: Sample, D: Domain> Signal<C, S, D> {
         self.sampling_rate = sampling_rate;
         self
     }
+
     pub fn cha_mut(&mut self, c: usize) -> &mut Vec<S> {
         &mut self.channels[c]
     }
+
     pub(crate) fn cha_mut_uc(&mut self, c: usize) -> &mut Vec<S> {
         unsafe { self.channels.get_unchecked_mut(c) }
     }
+
     pub fn iter_cha_mut(&mut self) -> impl Iterator<Item = &mut Vec<S>> {
         self.channels.iter_mut()
+    }
+
+    pub fn for_each_cha_mut<F: FnMut(&mut Vec<S>)>(&mut self, op: F) {
+        self.channels.iter_mut().for_each(op);
+    }
+}
+
+impl<const C: usize, S: Sample> Signal<C, S, FreqDomain> {
+    #[allow(non_snake_case)]
+    pub fn new_from_halved(
+        mut channels: [Vec<S>; C],
+        sampling_rate: Option<Hertz>,
+        N: usize,
+    ) -> Self
+    where
+        S: num_complex::ComplexFloat,
+    {
+        channels.iter_mut().for_each(|cha_mut| {
+            let N_f = cha_mut.len();
+            cha_mut.reserve_exact(N - N_f);
+            for m in N_f..N {
+                cha_mut.push(cha_mut[N - m].conj())
+            }
+        });
+        Self {
+            channels,
+            sampling_rate,
+            _domain: FreqDomain::default(),
+        }
     }
 }
 

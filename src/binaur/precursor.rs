@@ -165,42 +165,30 @@ impl BinauralizerPrecursor {
     }
 
     pub fn into_binauralizer(mut self) -> Binauralizer {
-        // The first important step is to remove the delay in the HRIRs
-        self.hrir_vec.iter_mut().for_each(|hrir| {
-            let hrir_spike_smooth = hrir
-                .clone()
-                .abs()
-                .apply_gaussian_filter(10, 0.05)
-                .normalize_to(hrir.get_abs_max());
+        // The first important step is to remove the delay in the HRIRs (or rather make it uniform)
+        self.hrir_vec = self
+            .hrir_vec
+            .into_iter()
+            .map(|hrir| {
+                let hrir_spike_smooth = hrir
+                    .view()
+                    .abs()
+                    .apply_gaussian_filter(10, 0.05)
+                    .normalize_to(hrir.get_abs_max());
 
-            const CENTER_INDEX: usize = 30;
+                const CENTER_INDEX: isize = 30;
 
-            // We align both peaks to the currently arbitrary position of 30
-            let mut adjust_peak = |c: usize| {
-                let peak_idx = hrir_spike_smooth.index_cha(c).get_abs_max_index();
+                // We align both peaks to the currently arbitrary position of `CENTER_INDEX`
+                let left_peak_idx = hrir_spike_smooth.index_cha(0).get_abs_max_index() as isize;
+                let right_peak_idx = hrir_spike_smooth.index_cha(1).get_abs_max_index() as isize;
 
-                #[allow(non_snake_case)]
-                let Δ_abs = peak_idx.abs_diff(CENTER_INDEX);
-
-                // peak is to the right, we remove Δ_abs elements from the start to shift it to the left
-                if peak_idx > CENTER_INDEX {
-                    hrir.cha_mut_uc(c).drain(0..Δ_abs);
-                    hrir.cha_mut_uc(c).resize(self.hrir_size, 0.0);
-                }
-                // peak is to the left, we add Δ_abs elements to the start to shift it to the right
-                else if peak_idx < CENTER_INDEX {
-                    let mut vec = vec![0.0; Δ_abs];
-                    vec.extend_from_slice(hrir.cha_uc(c));
-                    vec.resize(self.hrir_size, 0.0);
-                    *hrir.cha_mut_uc(c) = vec;
-                }
-
+                hrir.shift(
+                    [CENTER_INDEX - left_peak_idx, CENTER_INDEX - right_peak_idx],
+                    [0.0; 2],
+                )
                 // TODO: maybe apply window function here as well to avoid any discontinuities?
-            };
-
-            adjust_peak(0);
-            adjust_peak(1);
-        });
+            })
+            .collect();
 
         /*
         let hrir_rtree = rstar::RTree::bulk_load(

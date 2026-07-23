@@ -6,3 +6,4 @@ sofa_conversion/input
 sofa_conversion/output
 /target
 *.svg
+*.wav

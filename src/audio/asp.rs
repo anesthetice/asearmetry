@@ -11,7 +11,7 @@ use crate::{
     signal::{DSP, DefinedLtiConvolution, TimeDomain},
 };
 use itertools::Itertools;
-use std::f32::consts::PI;
+use std::{f32::consts::PI, ops::MulAssign};
 
 pub trait ASP<const C: usize>: DSP<C, f32, TimeDomain> {
     fn duration(&self) -> Option<Seconds> {
@@ -21,6 +21,22 @@ pub trait ASP<const C: usize>: DSP<C, f32, TimeDomain> {
     fn delay(&self, by: Seconds) -> AudioBuffer<C> {
         let sampling_rate = self.sr_or_panic();
         self.pad_left((by * sampling_rate).ceil() as usize)
+    }
+
+    fn fade_in_linear(self, n_samples: usize) -> AudioBuffer<C> {
+        assert!(n_samples > 1);
+        let mut out = self.into_owned();
+
+        let slope = 1.0_f32 / (n_samples - 1) as f32;
+        out.iter_cha_mut().for_each(|cha_mut| {
+            cha_mut
+                .iter_mut()
+                .take(n_samples)
+                .enumerate()
+                .for_each(|(idx, s)| s.mul_assign(idx as f32 * slope))
+        });
+
+        out
     }
 
     /// The parameter M is such that the filter's number of taps (i.e. its length) is equal to 2M+1.
@@ -141,9 +157,7 @@ pub trait ASP<const C: usize>: DSP<C, f32, TimeDomain> {
             self.get_abs_max()
         );
 
-        let sampling_rate = self
-            .sampling_rate()
-            .ok_or_else(|| anyhow::anyhow!("The sampling rate must be defined to write audio"))?;
+        let sampling_rate = self.sr_or_panic();
 
         let spec = hound::WavSpec {
             channels: C as u16,

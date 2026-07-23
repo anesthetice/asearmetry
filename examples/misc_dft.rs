@@ -32,32 +32,29 @@ fn inner() -> anyhow::Result<()> {
     // before applying a low pass filter to see the effects on a plot.
     const duration: Seconds = 5.0;
     const sampling_rate: Hertz = 44_100.0;
-    const N_ts: usize = (sampling_rate * duration) as usize;
-    const N_fs: usize = (N_ts / 2) + 1;
-    const Δf: Hertz = sampling_rate / N_ts as f64;
+    const N_t: usize = (sampling_rate * duration) as usize;
+    const N_f: usize = (N_t / 2) + 1;
+    const Δf: Hertz = sampling_rate / N_t as f64;
     const f_cutoff: Hertz = 5_000.0;
     const RNG_seed: u64 = 2000;
 
-    let freq_samples = {
+    let freq_samples_halved = {
         let mut rng = rand::rngs::SmallRng::seed_from_u64(RNG_seed);
-        let N_fs_nonzero_start = (20.0 / Δf).ceil() as usize;
-        let N_fs_nonzero_end = (20_000.0 / Δf).ceil() as usize;
+        let N_f_nonzero_start = (20.0 / Δf).ceil() as usize;
+        let N_f_nonzero_end = (20_000.0 / Δf).ceil() as usize;
 
-        let mut spectrum = vec![Complex32::ZERO; N_fs];
+        let mut spectrum = vec![Complex32::ZERO; N_f];
         // Note that spectrum[0] is already 0 (→ mean of zero which is what we want).
 
-        for z in &mut spectrum[N_fs_nonzero_start..=N_fs_nonzero_end] {
+        for z in &mut spectrum[N_f_nonzero_start..=N_f_nonzero_end] {
             let phase = rng.random_range(0.0..TAU);
             *z = Complex32::from_polar(1.0, phase);
         }
+
         spectrum
     };
 
-    let white_noise_fs = Signal {
-        channels: [freq_samples],
-        sampling_rate: Some(sampling_rate),
-        _domain: FreqDomain { N_ts },
-    };
+    let white_noise_fs = Signal::new_from_halved([freq_samples_halved], Some(sampling_rate), N_t);
 
     let mut plots: Vec<Vec<Plot>> = Vec::new();
     let mut layouts: Vec<Layout> = Vec::new();

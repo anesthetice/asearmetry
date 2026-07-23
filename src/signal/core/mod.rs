@@ -14,13 +14,14 @@ pub use sample::Sample;
 
 /// Represents a potentially multichannel discrete signal
 ///
-/// Samples are stored in a channel-major layout, with one
-/// owned buffer per channel.
+/// Samples are stored in a channel-major layout, i.e. with one
+/// vector of samples per channel. All vectors are expected to
+/// have identical length.
 ///
-/// The constant generic parameter `C` refers to the number
-/// of channels, the generic `S` refers to the type of the sample,
-/// and the generic `D` signifies the domain of the signal,
-/// currently `TimeDomain` or `FreqDomain`.
+/// The constant generic parameter `C` refers to the number of channels,
+/// the generic `S` refers to the underlying sample type used,
+/// and the generic `D` represents the domain of the signal,
+/// which can currently be either `TimeDomain` or `FreqDomain`.
 #[derive(Clone, PartialEq, PartialOrd)]
 pub struct Signal<const C: usize, S: Sample, D: Domain> {
     pub channels: [Vec<S>; C],

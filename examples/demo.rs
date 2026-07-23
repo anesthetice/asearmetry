@@ -9,17 +9,57 @@ use asearmetry::{
     binaur::{Binauralizer, BinauralizerPrecursor},
     coordinates::{Cart3D, Shell2D, Sphere3D},
     math::{Radians, Seconds},
-    signal::DSP,
+    signal::{DSP, Signal},
     trajectory::{self, Trajectory},
 };
 use itertools::Itertools;
+use num_complex::Complex32;
 use petgraph::graph::NodeIndex;
 use rand::RngExt;
-use std::{f64::consts::PI, ops::Add};
+use std::{f32::consts::PI as PI_F32, f64::consts::PI, ops::Add};
 use tap::Tap;
 
 fn main() -> anyhow::Result<()> {
     env_logger::Builder::from_env(env_logger::Env::default().default_filter_or("info")).init();
+
+    let filter: MonoAudioBuf = {
+        const M: i64 = 5;
+        let a: f32 = 0.5;
+        let num_taps = (M * 2) + 1;
+        (0..num_taps)
+            .map(|n| {
+                // We must offset the center of the filter by M to the right as we are in the discrete case, h[n<0]=0
+                let x = (n - M) as f32;
+                let ideal = f32::sqrt(a / PI_F32) * f32::exp(-a * x.powi(2));
+
+                // Once again we use the Hann window function to avoid the "Gibbs Phenomenon".
+                let hann = f32::sin(PI_F32 * n as f32 / (2 * M) as f32).powi(2);
+
+                ideal * hann
+            })
+            .collect_vec()
+            .into()
+    };
+
+    let mut time_samples = vec![0.0_f32; 31];
+    time_samples[15] = 10.0;
+
+    let input_sig = Signal::new_mono(time_samples, Some(100.0));
+
+    let output_sig_1 = input_sig.convolve(filter.view());
+
+    let output_sig_2 = input_sig.dft().mul(filter.dft()).idft();
+
+    let len_conv = input_sig.len() + filter.len() - 1;
+    let output_sig_3 = input_sig
+        .pad_right_to_len(len_conv)
+        .dft()
+        .mul(filter.pad_right_to_len(len_conv).dft())
+        .idft();
+
+    println!("{output_sig_1}\n{output_sig_2}\n{output_sig_3}");
+
+    return Ok(());
 
     let mut raw_data = std::fs::read("sofa_conversion/output/temp.raw")?;
 
