@@ -5,9 +5,9 @@
 */
 
 use crate::{
-    audio::{ASP, AudioBuffer, AudioBufferSlice},
     coordinates::Cart3D,
     math::Seconds,
+    signal::audio::{ASP, AudioBuffer, AudioBufferSlice},
     trajectory::Trajectory,
 };
 

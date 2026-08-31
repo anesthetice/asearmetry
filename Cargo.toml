@@ -8,52 +8,45 @@ license = "MPL-2.0"
 name = "asearmetry"
 path = "src/lib.rs"
 
-[[example]]
-name = "demo"
-
-[[example]]
-name = "check_resampling"
-
-[[example]]
-name = "check_binauralizer"
-
 [dependencies]
 anyhow = { version = "1.0" }
 approx = { version = "0.5" }
 bon = { version = "3.9" }
-hound = { version = "3.5" }
-itertools = { version = "0.14" }
+bytemuck = { version = "1.25" }
+itertools = { version = "0.15" }
 indoc = { version = "2.0" }
 log = { version = "0.4", features = ["std"] }
 num-traits = { version = "0.2" }
 num-complex = { version = "0.4" }
 petgraph = { version = "0.8" }
+rand = { version = "0.10" }
 rayon = { version = "1.12" }
 realfft = { version = "3.5" }
 rstar = { version = "0.13" }
-symphonia = { version = "0.6" }
+symphonia = { version = "0.6", features = ["mp3"] }
 tap = { version = "1.0" }
 
 # optional dependencies
 bitcode = { version = "0.6", optional = true, features = ["derive"] }
 cosmic-text = { version = "0.19", optional = true }
-kuva = { version = "0.2", optional = true }
+crc-any = { version = "3.0", optional = true }
+kuva = { version = "0.5", optional = true }
+opusic-c = { version = "1.6", optional = true }
 pixels = { version = "0.17", optional = true }
-polars = { version = "0.53", default-features = false, features = ["fmt", "parquet"], optional = true }
 serde = { version = "1.0", optional = true, features = ["derive"] }
+symphonia-adapter-libopus = { version = "0.3", optional = true }
 tiny-skia = { version = "0.12", optional = true }
 winit = { version = "0.30", optional = true }
 
 [dev-dependencies]
-env_logger = "0.11"
-rand = { version = "0.10" }
+env_logger = { version = "0.11" }
 
 [features]
-default = ["bitcode", "plot", "polars", "serde", "viewer"]
+default = ["bitcode", "opus", "plot", "serde", "viewer"]
 bitcode = ["dep:bitcode"]
+opus = ["dep:crc-any", "dep:opusic-c", "dep:symphonia-adapter-libopus"]
 plot = ["dep:kuva"]
-polars = ["dep:polars"]
-serde = ["dep:serde", "rstar/serde"]
+serde = ["dep:serde", "rstar/serde", "num-complex/serde"]
 viewer = ["dep:pixels", "dep:winit", "dep:cosmic-text", "dep:tiny-skia"]
 
 [profile.dev]

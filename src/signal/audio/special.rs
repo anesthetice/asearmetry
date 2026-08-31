@@ -6,19 +6,27 @@
 
 // Imports
 use crate::{
-    audio::{AudioBuffer, AudioBufferSlice, TimeDomain},
-    math::{Hertz, Radians, Seconds},
-    signal::DSP,
+    math::{Hertz, Radians, Seconds, apply_tukey_window},
+    signal::{
+        DSP, FreqDomain, Signal,
+        audio::{AudioBuffer, AudioBufferSlice, TimeDomain},
+    },
 };
 use itertools::Itertools;
-use std::f64::consts::TAU;
+use num_complex::Complex32;
+use std::{
+    f32::consts::TAU as TAU_F32, f64::consts::TAU as TAU_F64, marker::PhantomData, ops::MulAssign,
+};
 use std::{fs::File, path::Path};
-use symphonia::core::{
-    codecs::audio::AudioDecoderOptions,
-    errors::Error as SymphError,
-    formats::{FormatOptions, TrackType, probe::Hint},
-    io::MediaSourceStream,
-    meta::MetadataOptions,
+use symphonia::{
+    core::{
+        codecs::{audio::AudioDecoderOptions, registry::CodecRegistry},
+        errors::Error as SymphError,
+        formats::{FormatOptions, TrackType, probe::Hint},
+        io::MediaSourceStream,
+        meta::MetadataOptions,
+    },
+    default::register_enabled_codecs,
 };
 
 pub type MonoAudioBuf = AudioBuffer<1>;
@@ -34,7 +42,7 @@ impl MonoAudioBuf {
         AudioBuffer {
             channels: [samples],
             sampling_rate,
-            _domain: TimeDomain {},
+            _domain: PhantomData,
         }
     }
 
@@ -50,18 +58,55 @@ impl MonoAudioBuf {
         frequency: Hertz,
         phase_offset: Radians,
     ) -> Self {
-        // Maybe just issue a warning instead?
-        //assert!(amplitude.abs() <= 1.0);
-
         let nb_samples = (sampling_rate * duration).ceil() as usize;
         let δt = 1.0 / sampling_rate;
-        let ω = TAU * frequency;
+        let ω = TAU_F64 * frequency;
 
         AudioBuffer::new_zeros(nb_samples)
             .with_sr(sampling_rate)
             .apply_enumerate(&mut |(n, _)| {
                 (amplitude * f64::sin((n as f64) * δt * ω + phase_offset)) as f32
             })
+    }
+
+    #[allow(non_snake_case)]
+    pub fn noise(
+        duration: Seconds,
+        sampling_rate: Hertz,
+        freq_bounds: (Hertz, Hertz),
+        alpha_tukey_window: f64,
+        rng: &mut impl rand::RngExt,
+    ) -> Self {
+        let (f_min, f_max) = freq_bounds;
+        println!("{f_min}, {f_max}, {sampling_rate}");
+
+        assert!(duration > 0.0);
+        assert!(sampling_rate > 0.0);
+        assert!(f_min >= 0.0 && f_min < f_max && f_min < sampling_rate / 2.0);
+
+        let N_t: usize = (sampling_rate * duration) as usize;
+        let N_f: usize = (N_t / 2) + 1;
+        let Δf: Hertz = sampling_rate / N_t as f64;
+
+        let N_f_nonzero_start = ((f_min / Δf).ceil() as usize).max(1);
+        let N_f_nonzero_end = ((f_max / Δf).ceil() as usize).min(N_f - 2);
+
+        // Note that spectrum_halved[0] is already 0 (→ mean of zero which is what we want).
+        let mut spectrum_halved = vec![Complex32::ZERO; N_f];
+
+        for z in &mut spectrum_halved[N_f_nonzero_start..=N_f_nonzero_end] {
+            let phase = rng.random_range(0.0..TAU_F32);
+            *z = Complex32::from_polar(1.0, phase);
+        }
+
+        apply_tukey_window(
+            &mut spectrum_halved[N_f_nonzero_start..=N_f_nonzero_end],
+            alpha_tukey_window,
+        );
+
+        Signal::<1, Complex32, FreqDomain>::new([spectrum_halved], Some(sampling_rate))
+            .idft_halved(N_t)
+            .normalize()
     }
 
     /// Load data from an audio file, works for audio files whose codec is supported
@@ -95,8 +140,6 @@ impl MonoAudioBuf {
             .audio()
             .unwrap();
 
-        println!("{track_audio_codec_params:?}");
-
         let track_n_channels = track_audio_codec_params
             .channels
             .as_ref()
@@ -106,10 +149,19 @@ impl MonoAudioBuf {
         let sampling_rate = track_audio_codec_params // safe as `TrackType::Audio` is set above
             .sample_rate
             .ok_or_else(|| anyhow::anyhow!("Unknown sampling rate"))?;
-        println!("Sampling rate: {} Hz", sampling_rate);
+
+        log::debug!(
+            "Starting to decode audio file located at '{}', track id: {track_id}, codec parameters: {track_audio_codec_params:?}, sampling rate: {sampling_rate} [Hz]",
+            filepath.display()
+        );
+
+        let mut codec_registry = CodecRegistry::new();
+        register_enabled_codecs(&mut codec_registry);
+        #[cfg(feature = "opus")]
+        codec_registry.register_audio_decoder::<symphonia_adapter_libopus::OpusDecoder>();
 
         // Create decoder.
-        let mut decoder = symphonia::default::get_codecs()
+        let mut decoder = codec_registry
             .make_audio_decoder(track_audio_codec_params, &AudioDecoderOptions::default())?;
 
         let mut raw_samples: Vec<f32> = Vec::new();
@@ -126,7 +178,7 @@ impl MonoAudioBuf {
             };
 
             if packet.track_id != track_id {
-                eprintln!("AA: {}", packet.track_id);
+                log::warn!("Packet ID does not match track ID");
                 continue;
             }
 
@@ -137,11 +189,11 @@ impl MonoAudioBuf {
                     raw_samples_holder.clear();
                 }
                 Err(err @ SymphError::IoError(_)) => {
-                    eprintln!("Failed to decode a packet due to an IO issue, {err}");
+                    log::warn!("Failed to decode a packet due to an IO issue, {err}");
                     continue;
                 }
                 Err(err @ SymphError::DecodeError(_)) => {
-                    eprintln!("Failed to decode a packet due to a decoder issue, {err}");
+                    log::warn!("Failed to decode a packet due to a decoder issue, {err}");
                     continue;
                 }
                 Err(err) => {
@@ -150,7 +202,12 @@ impl MonoAudioBuf {
             }
         }
 
-        println!("Decoded {} f32 samples", raw_samples.len());
+        log::debug!(
+            "Finished decoding the audio file at '{}', got {} samples at {sampling_rate} for a total duration of ~{:.1} [s]",
+            filepath.display(),
+            raw_samples.len(),
+            raw_samples.len() as f64 / sampling_rate as f64
+        );
 
         let mono_samples = raw_samples
             .chunks_exact(track_n_channels)
@@ -160,18 +217,3 @@ impl MonoAudioBuf {
         Ok(Self::new_mono(mono_samples, Some(sampling_rate as f64)))
     }
 }
-/*
-impl StereoAudioBuf {
-    pub fn from_left_right_mono<T1, T2>(left: T1, right: T2) -> Self
-    where
-        T1: DSP<1>,
-        T2: DSP<1>,
-    {
-        let sampling_rate =
-            Self::resolve_sampling_rate_pair(left.sampling_rate(), right.sampling_rate());
-        let [left] = left.into_owned().channels;
-        let [right] = right.into_owned().channels;
-        Self::new([left, right], sampling_rate)
-    }
-}
-*/

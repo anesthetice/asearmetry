@@ -4,14 +4,14 @@
  * file, You can obtain one at https://mozilla.org/MPL/2.0/.
 */
 
-#![allow(mixed_script_confusables)]
+#![allow(unused)]
 
 // Modules
-pub mod binaur;
-pub mod coordinates;
-pub mod math;
-pub mod prelude;
-pub mod scene;
-pub mod signal;
-pub mod trajectory;
-pub(crate) mod utils;
+mod bcursor;
+mod bwriter;
+mod io;
+
+// Exports
+pub(crate) use bcursor::BCursor;
+pub(crate) use bwriter::BWriter;
+pub(crate) use io::{read_from_file, write_to_file};

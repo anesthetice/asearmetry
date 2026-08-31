@@ -7,10 +7,10 @@
 #[cfg(feature = "viewer")]
 use crate::scene::core::ActorShape;
 use crate::{
-    audio::AudioBufferSlice,
     coordinates::{Cart3D, Coord3D},
     math::Seconds,
     scene::core::Modifiers,
+    signal::audio::AudioBufferSlice,
     trajectory::Trajectory,
 };
 use petgraph::Directed;

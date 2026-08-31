@@ -5,73 +5,19 @@
 */
 
 // Modules
+mod any3d;
 mod cartesian;
+mod misc;
 mod shell;
 mod spherical;
 
 // Exports
+pub use any3d::Coord3D;
 pub use cartesian::Cart3D;
+pub use misc::distance_los_point_to_sphere_surface_point;
+pub(crate) use misc::write_float;
 pub use shell::Shell2D;
 pub use spherical::{Sphere3D, clamp_azimuth, clamp_zenith};
-
-// Imports
-use crate::math::{Meters, Radians};
-
-#[derive(Debug, Clone, Copy, PartialEq)]
-#[cfg_attr(feature = "bitcode", derive(bitcode::Encode, bitcode::Decode))]
-#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
-pub enum Coord3D {
-    Cart(Cart3D),
-    Sphere(Sphere3D),
-}
-
-impl From<Cart3D> for Coord3D {
-    fn from(value: Cart3D) -> Self {
-        Self::Cart(value)
-    }
-}
-
-impl From<Sphere3D> for Coord3D {
-    fn from(value: Sphere3D) -> Self {
-        Self::Sphere(value)
-    }
-}
-
-impl Coord3D {
-    pub fn new_cart(x: Meters, y: Meters, z: Meters) -> Self {
-        Self::Cart(Cart3D::new(x, y, z))
-    }
-
-    pub fn new_sphere(r: Meters, θ: Radians, φ: Radians) -> Self {
-        Self::Sphere(Sphere3D::new(r, θ, φ))
-    }
-
-    pub fn as_cart(&self) -> Cart3D {
-        (*self).into()
-    }
-
-    pub fn as_sphere(&self) -> Sphere3D {
-        (*self).into()
-    }
-}
-
-impl From<Coord3D> for Cart3D {
-    fn from(value: Coord3D) -> Self {
-        match value {
-            Coord3D::Cart(cart_3d) => cart_3d,
-            Coord3D::Sphere(sphere_3d) => sphere_3d.into(),
-        }
-    }
-}
-
-impl From<Coord3D> for Sphere3D {
-    fn from(value: Coord3D) -> Self {
-        match value {
-            Coord3D::Cart(cart_3d) => cart_3d.into(),
-            Coord3D::Sphere(sphere_3d) => sphere_3d,
-        }
-    }
-}
 
 #[cfg(test)]
 mod test {
@@ -170,6 +116,61 @@ mod test {
         approx::assert_abs_diff_eq!(
             Sphere3D::from(z_negative_rest_zero),
             Sphere3D::new(1.0, 0.0, 0.0)
+        );
+    }
+
+    #[test]
+    fn shell_miscellaneous_checks() {
+        approx::assert_abs_diff_eq!(
+            Cart3D::new(1.0, 0.0, 0.0),
+            Shell2D::new(0.0, PI / 2.0).into_unit_vec_cart(),
+            epsilon = 1E-6
+        );
+
+        approx::assert_abs_diff_eq!(
+            Cart3D::new(0.700629269, -0.404508497, 0.587785252),
+            Shell2D::new(-PI / 6.0, PI / 2.0 + PI / 5.0).into_unit_vec_cart(),
+            epsilon = 1E-6
+        );
+
+        approx::assert_abs_diff_eq!(
+            Cart3D::new(0.700629269, -0.404508497, 0.587785252),
+            Shell2D::new(-PI / 6.0, PI / 2.0 + PI / 5.0)
+                .into_spherical(1.0)
+                .into(),
+            epsilon = 1E-6
+        );
+
+        let a = Shell2D::new(0.0, PI / 2.0);
+        let b = Shell2D::new(PI / 2.0, PI / 2.0);
+        approx::assert_abs_diff_eq!(a.dist_angular(b), PI / 2.0);
+        approx::assert_abs_diff_eq!(b.dist_angular(a), PI / 2.0);
+
+        let a = Shell2D::new(0.0, PI / 2.0);
+        let b = Shell2D::new(0.0, PI);
+        approx::assert_abs_diff_eq!(a.dist_angular(b), PI / 2.0);
+        approx::assert_abs_diff_eq!(b.dist_angular(a), PI / 2.0);
+
+        let a = Shell2D::new(0.0, PI / 2.0);
+        let b = Shell2D::new(PI, PI / 2.0);
+        approx::assert_abs_diff_eq!(a.dist_angular(b), PI);
+        approx::assert_abs_diff_eq!(b.dist_angular(a), PI);
+
+        let a = Shell2D::new((-PI).next_up(), PI / 2.0);
+        let b = Shell2D::new(PI, PI / 2.0);
+        approx::assert_abs_diff_eq!(a.dist_angular(b), 0.0, epsilon = 1E-6);
+        approx::assert_abs_diff_eq!(b.dist_angular(a), 0.0, epsilon = 1E-6);
+    }
+
+    #[test]
+    fn point_to_surface_point_distance_function_check() {
+        let point = Cart3D::new(-2.0, -5.0, 0.0);
+        let surface_point = Sphere3D::new(2.0, PI / 2.0, PI / 2.0);
+
+        approx::assert_abs_diff_eq!(
+            distance_los_point_to_sphere_surface_point(point, surface_point),
+            5.0 + 2.0 * PI / 2.0,
+            epsilon = 1E-6,
         );
     }
 }

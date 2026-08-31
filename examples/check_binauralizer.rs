@@ -1,11 +1,16 @@
 /* Any copyright is dedicated to the Public Domain.
  * https://creativecommons.org/publicdomain/zero/1.0/ */
 
-use asearmetry::{audio::ASP, coordinates::Sphere3D, signal::DSP};
+mod common;
+use common::get_example_filepath;
+
+use asearmetry::prelude::*;
 use std::f64::consts::PI;
 
 pub fn main() -> anyhow::Result<()> {
-    #[cfg(all(feature = "plot", feature = "polars"))]
+    env_logger::Builder::from_env(env_logger::Env::default().default_filter_or("debug")).init();
+
+    #[cfg(feature = "plot")]
     binaur_plot()?;
 
     #[cfg(not(feature = "plot"))]
@@ -14,7 +19,7 @@ pub fn main() -> anyhow::Result<()> {
     Ok(())
 }
 
-#[cfg(all(feature = "plot", feature = "polars"))]
+#[cfg(feature = "plot")]
 pub fn binaur_plot() -> anyhow::Result<()> {
     use asearmetry::binaur::BinauralizerPrecursor;
     let binaur_precursor =
@@ -38,7 +43,7 @@ pub fn binaur_plot() -> anyhow::Result<()> {
             .get_hrir_both(pos)
             .slice(0..80)
             .plot_builder()
-            .plot_line_stroke_width(1.5)
+            .plot_stroke_width(1.5)
             .layout_title(format!("Raw @ {pos}"))
             .build()
             .plot_and_layout();
@@ -49,7 +54,7 @@ pub fn binaur_plot() -> anyhow::Result<()> {
             .get_hrir_both(pos)
             .slice(0..80)
             .plot_builder()
-            .plot_line_stroke_width(1.5)
+            .plot_stroke_width(1.5)
             .layout_title(format!("Pro @ {pos}"))
             .build()
             .plot_and_layout();
@@ -63,7 +68,7 @@ pub fn binaur_plot() -> anyhow::Result<()> {
             .normalize_to(hrir.get_abs_max())
             .slice(0..80)
             .plot_builder()
-            .plot_line_stroke_width(1.5)
+            .plot_stroke_width(1.5)
             .layout_title(format!("Smooth @ {pos}"))
             .build()
             .plot_and_layout();

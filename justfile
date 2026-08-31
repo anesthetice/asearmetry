@@ -1,5 +1,8 @@
 r:
-    cargo run --example demo
+    RUST_BACKTRACE=1 cargo run --example demo
+
+f:
+    RUST_BACKTRACE=1 cargo run --example figures
 
 t:
-    cargo test --lib
+    RUST_BACKTRACE=1 cargo test --lib

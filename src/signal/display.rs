@@ -10,35 +10,31 @@ use indoc::writedoc;
 use itertools::Itertools;
 use num_complex::Complex32;
 
-impl<const C: usize, S: Sample + FloatDisplay, D: Domain> core::fmt::Debug for Signal<C, S, D> {
+impl<const C: usize, S: Sample, D: Domain> core::fmt::Debug for Signal<C, S, D> {
     fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
         display_debug_impl("Signal", self, f)
     }
 }
 
-impl<const C: usize, S: Sample + FloatDisplay, D: Domain> core::fmt::Display for Signal<C, S, D> {
+impl<const C: usize, S: Sample, D: Domain> core::fmt::Display for Signal<C, S, D> {
     fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
         core::fmt::Debug::fmt(&self, f)
     }
 }
 
-impl<const C: usize, S: Sample + FloatDisplay, D: Domain> core::fmt::Debug
-    for SignalSlice<'_, C, S, D>
-{
+impl<const C: usize, S: Sample, D: Domain> core::fmt::Debug for SignalSlice<'_, C, S, D> {
     fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
         display_debug_impl("SignalSlice", self, f)
     }
 }
 
-impl<const C: usize, S: Sample + FloatDisplay, D: Domain> core::fmt::Display
-    for SignalSlice<'_, C, S, D>
-{
+impl<const C: usize, S: Sample, D: Domain> core::fmt::Display for SignalSlice<'_, C, S, D> {
     fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
         core::fmt::Debug::fmt(&self, f)
     }
 }
 
-fn display_debug_impl<const C: usize, S: Sample + FloatDisplay, D: Domain, T>(
+fn display_debug_impl<const C: usize, S: Sample, D: Domain, T>(
     name: &str,
     s: T,
     f: &mut core::fmt::Formatter<'_>,
@@ -46,7 +42,7 @@ fn display_debug_impl<const C: usize, S: Sample + FloatDisplay, D: Domain, T>(
 where
     T: DSP<C, S, D>,
 {
-    let n_displayed_per_line: usize = <S as FloatDisplay>::CHUNK_SIZE;
+    let n_displayed_per_line: usize = <S as SampleDisplay>::CHUNK_SIZE;
 
     writedoc! {
     f,
@@ -89,13 +85,12 @@ where
     }
 }
 
-trait FloatDisplay {
+pub trait SampleDisplay {
     const CHUNK_SIZE: usize;
-
     fn print_to(&self, out: &mut String);
 }
 
-impl FloatDisplay for f32 {
+impl SampleDisplay for f32 {
     const CHUNK_SIZE: usize = 10;
 
     fn print_to(&self, mut out: &mut String) {
@@ -108,7 +103,7 @@ impl FloatDisplay for f32 {
     }
 }
 
-impl FloatDisplay for Complex32 {
+impl SampleDisplay for Complex32 {
     const CHUNK_SIZE: usize = 5;
 
     fn print_to(&self, mut out: &mut String) {
@@ -133,3 +128,26 @@ impl FloatDisplay for Complex32 {
         }
     }
 }
+
+macro_rules! impl_sample_display_generic {
+    ($type:ty) => {
+        impl SampleDisplay for $type {
+            const CHUNK_SIZE: usize = 10;
+            fn print_to(&self, mut out: &mut String) {
+                let _ = write!(&mut out, "{self}, ");
+            }
+        }
+    };
+}
+
+impl_sample_display_generic!(u8);
+impl_sample_display_generic!(u16);
+impl_sample_display_generic!(u32);
+impl_sample_display_generic!(u64);
+impl_sample_display_generic!(usize);
+
+impl_sample_display_generic!(i8);
+impl_sample_display_generic!(i16);
+impl_sample_display_generic!(i32);
+impl_sample_display_generic!(i64);
+impl_sample_display_generic!(isize);

@@ -87,33 +87,45 @@ impl<const C: usize, S: Sample, D: Domain> Signal<C, S, D> {
     pub fn last_n_split(&self, n: usize) -> (SignalSlice<'_, C, S, D>, SignalSlice<'_, C, S, D>) {
         (self.slice(..self.len() - n), self.slice(self.len() - n..))
     }
-    fn as_blocks(&self, block_size: usize) -> Vec<SignalSlice<'_, C, S, D>> {
+    pub fn as_blocks(&self, block_size: usize) -> impl Iterator<Item = SignalSlice<'_, C, S, D>> {
         let rem = self.len() % block_size;
         let rhs = (rem > 0).then(|| self.last_n(rem));
 
         (0..self.len() / block_size)
-            .map(|i| i * block_size..(i + 1) * block_size)
+            .map(move |i| i * block_size..(i + 1) * block_size)
             .map(|i| self.slice(i))
             .chain(rhs)
-            .collect()
     }
     #[allow(clippy::complexity)]
     pub fn as_blocks_strict(
         &self,
         block_size: usize,
     ) -> (
-        Vec<SignalSlice<'_, C, S, D>>,
+        impl Iterator<Item = SignalSlice<'_, C, S, D>>,
         Option<SignalSlice<'_, C, S, D>>,
     ) {
         let lhs = (0..self.len() / block_size)
-            .map(|i| i * block_size..(i + 1) * block_size)
-            .map(|i| self.slice(i))
-            .collect();
+            .map(move |i| i * block_size..(i + 1) * block_size)
+            .map(|i| self.slice(i));
 
         let rem = self.len() % block_size;
         let rhs = (rem > 0).then(|| self.last_n(rem));
 
         (lhs, rhs)
+    }
+
+    pub fn windowize(
+        &self,
+        length: usize,
+        step: usize,
+    ) -> impl Iterator<Item = SignalSlice<'_, C, S, D>> {
+        assert!(length > 0 && step > 0);
+        // The number of frames is given by: ⌊(len - window length) / step⌋ + 1
+        let n_frames = (self.len() - length) / step + 1;
+
+        (0..n_frames)
+            .map(move |i| i * step..(i * step) + length)
+            .map(|i| self.slice(i))
     }
 }
 
@@ -183,7 +195,7 @@ impl<'data, const C: usize, S: Sample, D: Domain> SignalSlice<'data, C, S, D> {
     pub fn last_n(&self, n: usize) -> SignalSlice<'data, C, S, D> {
         self.slice(self.len() - n..)
     }
-    fn skip_last_n(&self, n: usize) -> SignalSlice<'data, C, S, D> {
+    pub fn skip_last_n(&self, n: usize) -> SignalSlice<'data, C, S, D> {
         self.slice(0..self.len() - n)
     }
     /// The second element of the returned tuple contains the last n samples across all channels.
@@ -193,32 +205,45 @@ impl<'data, const C: usize, S: Sample, D: Domain> SignalSlice<'data, C, S, D> {
     ) -> (SignalSlice<'data, C, S, D>, SignalSlice<'data, C, S, D>) {
         (self.slice(..self.len() - n), self.slice(self.len() - n..))
     }
-    fn as_blocks(&self, block_size: usize) -> Vec<SignalSlice<'data, C, S, D>> {
+    pub fn as_blocks(
+        &self,
+        block_size: usize,
+    ) -> impl Iterator<Item = SignalSlice<'data, C, S, D>> {
         let rem = self.len() % block_size;
         let rhs = (rem > 0).then(|| self.last_n(rem));
 
         (0..self.len() / block_size)
-            .map(|i| i * block_size..(i + 1) * block_size)
+            .map(move |i| i * block_size..(i + 1) * block_size)
             .map(|i| self.slice(i))
             .chain(rhs)
-            .collect()
     }
     #[allow(clippy::complexity)]
     pub fn as_blocks_strict(
         &self,
         block_size: usize,
     ) -> (
-        Vec<SignalSlice<'data, C, S, D>>,
+        impl Iterator<Item = SignalSlice<'data, C, S, D>>,
         Option<SignalSlice<'data, C, S, D>>,
     ) {
         let lhs = (0..self.len() / block_size)
-            .map(|i| i * block_size..(i + 1) * block_size)
-            .map(|i| self.slice(i))
-            .collect();
+            .map(move |i| i * block_size..(i + 1) * block_size)
+            .map(|i| self.slice(i));
 
         let rem = self.len() % block_size;
         let rhs = (rem > 0).then(|| self.last_n(rem));
 
         (lhs, rhs)
+    }
+    pub fn windowize(
+        &self,
+        length: usize,
+        step: usize,
+    ) -> impl Iterator<Item = SignalSlice<'data, C, S, D>> {
+        assert!(length > 0 && step > 0);
+        // The number of frames is given by: ⌊(len - window length) / step⌋ + 1
+        let n_frames = (self.len() - length) / step + 1;
+        (0..n_frames)
+            .map(move |i| i * step..(i * step) + length)
+            .map(|i| self.slice(i))
     }
 }

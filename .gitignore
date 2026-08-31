@@ -7,3 +7,7 @@ sofa_conversion/output
 /target
 *.svg
 *.wav
+*.pdf
+
+# temporary
+Cargo.lock

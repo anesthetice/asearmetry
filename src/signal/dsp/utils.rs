@@ -9,7 +9,7 @@ use crate::signal::{Domain, Sample, Signal, SignalSlice};
 
 /// Contains either unsafe or duplicated utils that pay less attention to lifetimes
 pub(crate) trait DSPUtils<const C: usize, S: Sample, D: Domain> {
-    fn _as_view(&self) -> SignalSlice<'_, C, S, D>;
+    fn _view(&self) -> SignalSlice<'_, C, S, D>;
 
     /// Unsafe, access a channel without checking.
     fn _cha(&self, c: usize) -> &[S];
@@ -31,7 +31,7 @@ pub(crate) trait DSPUtils<const C: usize, S: Sample, D: Domain> {
 }
 
 impl<const C: usize, S: Sample, D: Domain> DSPUtils<C, S, D> for Signal<C, S, D> {
-    fn _as_view(&self) -> SignalSlice<'_, C, S, D> {
+    fn _view(&self) -> SignalSlice<'_, C, S, D> {
         self.into()
     }
     fn _cha(&self, c: usize) -> &[S] {
@@ -46,7 +46,7 @@ impl<const C: usize, S: Sample, D: Domain> DSPUtils<C, S, D> for Signal<C, S, D>
 }
 
 impl<const C: usize, S: Sample, D: Domain> DSPUtils<C, S, D> for SignalSlice<'_, C, S, D> {
-    fn _as_view(&self) -> SignalSlice<'_, C, S, D> {
+    fn _view(&self) -> SignalSlice<'_, C, S, D> {
         *self
     }
     fn _cha(&self, c: usize) -> &[S] {
@@ -64,8 +64,8 @@ impl<const C: usize, T, S: Sample, D: Domain> DSPUtils<C, S, D> for &T
 where
     T: DSPUtils<C, S, D>,
 {
-    fn _as_view(&self) -> SignalSlice<'_, C, S, D> {
-        (*self)._as_view()
+    fn _view(&self) -> SignalSlice<'_, C, S, D> {
+        (*self)._view()
     }
     fn _cha(&self, c: usize) -> &[S] {
         (*self)._cha(c)

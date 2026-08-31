@@ -5,20 +5,17 @@
 */
 
 // Modules
+mod precursor;
 mod store;
 
-#[cfg(feature = "polars")]
-mod precursor;
-
 // Exports
-#[cfg(feature = "polars")]
 pub use precursor::BinauralizerPrecursor;
 
 // Imports
 use crate::{
-    audio::{ASP, AudioBuffer, AudioBufferSlice, StereoAudioBuf},
     coordinates::{Cart3D, Shell2D, Sphere3D},
     math::{Hertz, Meters},
+    signal::audio::{ASP, AudioBuffer, AudioBufferSlice, StereoAudioBuf},
     signal::{_convolve_ltv, LtvFilter},
     trajectory::Trajectory,
 };
@@ -32,7 +29,7 @@ pub type HrirProjection = GeomWithData<Shell2D, AudioBuffer<2>>;
 pub struct Binauralizer {
     pub hrir_rtree: RTree<HrirProjection>,
     pub hrir_radius: Meters,
-    pub hrir_size: usize,
+    pub hrir_length: usize,
     pub hrir_sampling_rate: Hertz,
     pub left_ear_pos: Cart3D,
     pub right_ear_pos: Cart3D,
@@ -278,7 +275,7 @@ impl Binauralizer {
 
         AudioBuffer::<2>::crossfade_concatenate(
             iter,
-            (self.hrir_size as f32 * 1.0).floor() as usize,
+            (self.hrir_length as f32 * 1.0).floor() as usize,
         )
         .with_sampling_rate(Some(src_sampling_rate))
     }

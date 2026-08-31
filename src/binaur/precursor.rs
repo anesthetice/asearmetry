@@ -6,24 +6,24 @@
 
 // Imports
 use crate::{
-    audio::{ASP, AudioBuffer, StereoAudioBuf},
     binaur::{Binauralizer, HrirProjection},
     coordinates::{Cart3D, Shell2D},
     math::{Hertz, Meters},
-    signal::DSP,
+    signal::{
+        DSP,
+        audio::{ASP, AudioBuffer, StereoAudioBuf},
+    },
+    utils::{BCursor, read_from_file},
 };
-use anyhow::{Context, anyhow};
 use itertools::Itertools;
-use polars::prelude::*;
-use std::{collections::HashMap, path::Path};
-use tap::Pipe;
+use std::{io::Read, path::Path};
 
 #[derive(Debug, Clone)]
 pub struct BinauralizerPrecursor {
     pub hrir_vec: Vec<StereoAudioBuf>,
     pub hrir_pos_vec: Vec<Shell2D>,
     pub hrir_radius: Meters,
-    pub hrir_size: usize,
+    pub hrir_length: usize,
     pub hrir_sampling_rate: Hertz,
     pub left_ear_pos: Cart3D,
     pub right_ear_pos: Cart3D,
@@ -39,124 +39,43 @@ impl BinauralizerPrecursor {
             filepath.display()
         );
 
-        let mut reader = ParquetReader::new(std::fs::File::open(filepath)?);
+        let buf = read_from_file(filepath, Some(6291456))?; // 6 Mebibytes
+        let mut bcursor = BCursor::new(buf.as_slice());
 
-        let key_value_metadata = reader
-            .get_metadata()?
-            .key_value_metadata
-            .clone()
-            .ok_or_else(|| anyhow::anyhow!("Missing key-value metadata in parquet file"))?
-            .into_iter()
-            .filter_map(|kv| Some((kv.key, kv.value?)))
-            .collect::<HashMap<String, String>>();
+        let hrir_sampling_rate = bcursor.try_capture_f64()?;
+        let hrir_length = bcursor.try_capture_u64()? as usize;
+        let left_ear_pos = Cart3D::from(bcursor.try_capture_f64_trio()?);
+        let right_ear_pos = Cart3D::from(bcursor.try_capture_f64_trio()?);
+        let hrir_radius = bcursor.try_capture_f64()?;
 
-        let hrir_sampling_rate = key_value_metadata
-            .get("sampling_rate")
-            .ok_or_else(|| anyhow!("Missing `sampling_rate` key-value pair"))?
-            .parse::<Hertz>()?;
-
-        let left_ear_pos: Cart3D = key_value_metadata
-            .get("left_ear_position_cartesian")
-            .ok_or_else(|| anyhow!("Missing `left_ear_position_cartesian` key-value pair"))?
-            .split(",")
-            .map(|s| s.trim().parse::<f64>().unwrap())
-            .collect_tuple::<(f64, f64, f64)>()
-            .ok_or_else(|| {
-                anyhow!(
-                    "Invalid `left_ear_position_cartesian` value, could not extract (f32; 3) tuple"
-                )
-            })?
-            .into();
-
-        let right_ear_pos: Cart3D = key_value_metadata
-            .get("right_ear_position_cartesian")
-            .ok_or_else(|| anyhow!("Missing `right_ear_position_cartesian` key-value pair"))?
-            .split(",")
-            .map(|s| s.trim().parse::<f64>().unwrap())
-            .collect_tuple::<(f64, f64, f64)>()
-            .ok_or_else(|| {
-                anyhow!(
-                    "Invalid `right_ear_position_cartesian` value, could not extract (f32; 3) tuple"
-                )
-            })?
-            .into();
+        let n_elements = bcursor.try_capture_u64()? as usize;
+        let mut hrir_vec = Vec::with_capacity(n_elements);
+        let mut hrir_pos_vec = Vec::with_capacity(n_elements);
+        for _ in 0..n_elements {
+            hrir_pos_vec.push(Shell2D::from(bcursor.try_capture_f64_duo()?).clamp_angles());
+            hrir_vec.push(StereoAudioBuf::new(
+                [
+                    bcursor.try_capture_f32_array(hrir_length)?.to_vec(),
+                    bcursor.try_capture_f32_array(hrir_length)?.to_vec(),
+                ],
+                Some(hrir_sampling_rate),
+            ));
+        }
 
         log::debug!(
             "Finished parsing dataframe metadata, got: sampling rate: {hrir_sampling_rate:.1} Hz, left ear position: {left_ear_pos}, right ear position: {right_ear_pos}"
         );
 
-        let df = reader.finish()?;
-
-        let process_float_col = |name: &str| -> anyhow::Result<Vec<f64>> {
-            df.column(name)
-                .with_context(|| format!("The desired column `{name}` does not exist"))?
-                .f64()
-                .with_context(|| {
-                    format!("Expected the column `{name}` to have a `Float64` datatype")
-                })?
-                .into_no_null_iter()
-                .collect_vec()
-                .pipe(Ok)
-        };
-
-        let process_list_float_col = |name: &str| -> anyhow::Result<Vec<Vec<f32>>> {
-            df.column(name)
-                .with_context(|| format!("The desired column `{name}` does not exist"))?
-                .list()
-                .with_context(|| format!("Expected the column `{name}` to have a `List` datatype"))?
-                .into_iter()
-                .map(|s| s.unwrap().f32().unwrap().into_no_null_iter().collect_vec())
-                .collect_vec()
-                .pipe(Ok)
-        };
-
-        let src_radius_vec = process_float_col("src_radius")?;
-        let src_azimuth_vec = process_float_col("src_azimuth")?;
-        let src_zenith_vec = process_float_col("src_zenith")?;
-        let hrir_left_vec = process_list_float_col("hrir_left")?;
-        let hrir_right_vec = process_list_float_col("hrir_right")?;
-
-        {
-            let comparator = src_radius_vec.first().unwrap();
-            assert!(
-                src_radius_vec
-                    .iter()
-                    .all(|r| approx::abs_diff_eq!(r, comparator, epsilon = 1E-2)),
-                "Currently only handles cases where the radius of the source is constant."
-            );
-        }
-
-        let hrir_radius = src_radius_vec.first().unwrap().round();
-
-        assert!(hrir_left_vec.iter().map(Vec::len).all_equal());
-        assert!(hrir_right_vec.iter().map(Vec::len).all_equal());
-        assert_eq!(
-            hrir_left_vec.first().map(|v| v.len()),
-            hrir_right_vec.first().map(|v| v.len())
-        );
-
-        let hrir_size = hrir_left_vec.first().unwrap().len();
-
-        let hrir_vec = itertools::izip!(hrir_left_vec, hrir_right_vec)
-            .map(|(hrir_left, hrir_right)| {
-                StereoAudioBuf::from([hrir_left, hrir_right]).with_sr(hrir_sampling_rate)
-            })
-            .collect_vec();
-
-        let hrir_pos_vec = itertools::izip!(src_azimuth_vec, src_zenith_vec,)
-            .map(|(azimuth, zenith)| Shell2D::new(azimuth, zenith).clamp_angles())
-            .collect_vec();
-
         log::debug!(
             "Finished loading `BinauralizerPrecursor`, with {} HRIRs",
-            hrir_vec.len()
+            n_elements
         );
 
         Ok(BinauralizerPrecursor {
             hrir_vec,
             hrir_pos_vec,
             hrir_radius,
-            hrir_size,
+            hrir_length,
             hrir_sampling_rate,
             left_ear_pos,
             right_ear_pos,
@@ -201,6 +120,8 @@ impl BinauralizerPrecursor {
         */
 
         // The second step is to interpolate more HRIRs
+        const N_NEAREST: usize = 4;
+        const N_INTERP_POINTS: usize = 16_384 * 8;
         let hrir_rtree = {
             // Original non-interpolated rtree
             let hrir_rtree_ni = rstar::RTree::bulk_load(
@@ -211,9 +132,7 @@ impl BinauralizerPrecursor {
                     .collect(),
             );
 
-            const N_NEAREST: usize = 3;
-
-            let rtree_elements = Shell2D::generate_fib_lattice(4096)
+            let rtree_elements = Shell2D::generate_fib_lattice(N_INTERP_POINTS)
                 .into_iter()
                 .map(|new_pos| {
                     //println!("desired position: {}", new_pos);
@@ -225,7 +144,7 @@ impl BinauralizerPrecursor {
                         .nearest_neighbor_iter(new_pos.into())
                         .take(N_NEAREST)
                         .for_each(|gwd| {
-                            let dist = gwd.geom().dist(new_pos);
+                            let dist = gwd.geom().dist_angular(new_pos);
                             //println!("• close to: {}, with a dist of: {}", gwd.geom(), dist);
                             total_dist += dist;
                             dists.push(dist);
@@ -236,15 +155,22 @@ impl BinauralizerPrecursor {
 
                     assert!(total_dist > 0.0);
 
-                    let new_hrir = hrirs.into_iter().zip(dists).fold(
-                        AudioBuffer::<2>::with_capacity(self.hrir_size, None),
-                        |new_hrir, (hrir, dist)| {
-                            let weight = (dist / total_dist) as f32;
-                            new_hrir.merge_with(hrir.apply(|x| x * weight))
+                    // Higher is better this time, unlike the angular distance.
+                    let scores = dists
+                        .into_iter()
+                        .map(|dist| total_dist - dist)
+                        .collect_vec();
+                    let total_score = scores.iter().sum::<f64>();
+
+                    let hrir_interp = hrirs.into_iter().zip(scores).fold(
+                        AudioBuffer::<2>::with_capacity(self.hrir_length, None),
+                        |hrir_interp, (hrir, score)| {
+                            let weight = (score / total_score) as f32;
+                            hrir_interp.merge_with(hrir.apply(|x| x * weight))
                         },
                     );
 
-                    HrirProjection::new(new_pos, new_hrir)
+                    HrirProjection::new(new_pos, hrir_interp)
                 })
                 .collect_vec();
 
@@ -254,7 +180,7 @@ impl BinauralizerPrecursor {
         Binauralizer {
             hrir_rtree,
             hrir_radius: self.hrir_radius,
-            hrir_size: self.hrir_size,
+            hrir_length: self.hrir_length,
             hrir_sampling_rate: self.hrir_sampling_rate,
             left_ear_pos: self.left_ear_pos,
             right_ear_pos: self.right_ear_pos,
@@ -290,8 +216,8 @@ impl BinauralizerPrecursor {
             let right_start = find_start(1);
 
             max_len = max_len
-                .max(self.hrir_size - left_start)
-                .max(self.hrir_size - right_start);
+                .max(self.hrir_length - left_start)
+                .max(self.hrir_length - right_start);
 
             hrir.cha_mut_uc(0).drain(0..left_start);
             hrir.cha_mut_uc(1).drain(0..right_start);
@@ -311,7 +237,7 @@ impl BinauralizerPrecursor {
         Binauralizer {
             hrir_rtree,
             hrir_radius: self.hrir_radius,
-            hrir_size: max_len,
+            hrir_length: max_len,
             hrir_sampling_rate: self.hrir_sampling_rate,
             left_ear_pos: self.left_ear_pos,
             right_ear_pos: self.right_ear_pos,
@@ -330,7 +256,7 @@ impl BinauralizerPrecursor {
         Binauralizer {
             hrir_rtree,
             hrir_radius: self.hrir_radius,
-            hrir_size: self.hrir_size,
+            hrir_length: self.hrir_length,
             hrir_sampling_rate: self.hrir_sampling_rate,
             left_ear_pos: self.left_ear_pos,
             right_ear_pos: self.right_ear_pos,

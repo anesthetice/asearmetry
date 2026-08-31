@@ -5,6 +5,7 @@
 */
 
 // Modules
+pub mod audio;
 mod borrowed;
 mod common;
 mod core;
@@ -13,6 +14,19 @@ mod dsp;
 mod owned;
 
 // Exports
-pub use core::{AnyDomain, Domain, FreqDomain, Sample, Signal, SignalSlice, TimeDomain};
-pub use dsp::{_convolve_lti, _convolve_ltv, _dft, _dft_rayon, _idft, _idft_rayon, DSP, LtvFilter};
+pub use core::{
+    AnyDomain, Domain, FreqDomain, IsKnownSampleType, KnownSampleType, Sample, Signal, SignalSlice,
+    StftDomain, StftInfo, TimeDomain,
+};
+pub use display::SampleDisplay;
+pub use dsp::{
+    _convolve_lti, _convolve_ltv, _dft, _dft_rayon, _fft_full, _fft_halved, _idft, _idft_rayon,
+    _ifft, DSP, LtvFilter,
+};
 pub(crate) use dsp::{DSPUtils, DefinedLtiConvolution};
+pub use opusic_c::Bandwidth;
+
+pub type TimeSignal<const C: usize, S> = Signal<C, S, TimeDomain>;
+pub type TimeSignalSlice<'data, const C: usize, S> = SignalSlice<'data, C, S, TimeDomain>;
+pub type FreqSignal<const C: usize, S> = Signal<C, S, FreqDomain>;
+pub type FreqSignalSlice<'data, const C: usize, S> = SignalSlice<'data, C, S, FreqDomain>;

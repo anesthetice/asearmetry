@@ -14,32 +14,47 @@ pub struct TimeDomain {}
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub struct FreqDomain {}
 
+#[derive(Debug, Clone, Copy, Default, PartialEq)]
+#[cfg_attr(feature = "bitcode", derive(bitcode::Encode, bitcode::Decode))]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
+pub struct StftDomain {}
+
+#[derive(Debug, Clone, Copy, Default, PartialEq)]
+#[cfg_attr(feature = "bitcode", derive(bitcode::Encode, bitcode::Decode))]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
+pub struct StftInfo {
+    pub hop_length: usize,
+    pub frame_length: usize,
+    pub padding: (usize, usize),
+}
+
 pub trait Domain:
-    core::fmt::Debug + core::fmt::Display + Clone + Copy + Default + PartialEq + Into<AnyDomain>
+    'static
+    + Send
+    + Sync
+    + Clone
+    + Copy
+    + Default
+    + PartialEq
+    + core::fmt::Debug
+    + core::fmt::Display
+    + Into<AnyDomain>
+where
+    Self::Inner: Domain,
 {
     type Inner;
-    fn as_inner(&self) -> &Self::Inner;
-    fn into_inner(self) -> Self::Inner;
 }
 
 impl Domain for TimeDomain {
     type Inner = TimeDomain;
-    fn as_inner(&self) -> &Self::Inner {
-        self
-    }
-    fn into_inner(self) -> Self::Inner {
-        self
-    }
 }
 
 impl Domain for FreqDomain {
     type Inner = FreqDomain;
-    fn as_inner(&self) -> &Self::Inner {
-        self
-    }
-    fn into_inner(self) -> Self::Inner {
-        self
-    }
+}
+
+impl Domain for StftDomain {
+    type Inner = StftDomain;
 }
 
 impl core::fmt::Display for TimeDomain {
@@ -54,31 +69,45 @@ impl core::fmt::Display for FreqDomain {
     }
 }
 
+impl core::fmt::Display for StftDomain {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str("frequency (short time)")
+    }
+}
+
 #[derive(Debug, Clone, Copy, PartialEq)]
 #[cfg_attr(feature = "bitcode", derive(bitcode::Encode, bitcode::Decode))]
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub enum AnyDomain {
-    Time(TimeDomain),
-    Freq(FreqDomain),
+    Time,
+    Freq,
+    Stft,
 }
 
 impl From<TimeDomain> for AnyDomain {
-    fn from(value: TimeDomain) -> Self {
-        Self::Time(value)
+    fn from(_: TimeDomain) -> Self {
+        Self::Time
     }
 }
 
 impl From<FreqDomain> for AnyDomain {
-    fn from(value: FreqDomain) -> Self {
-        Self::Freq(value)
+    fn from(_: FreqDomain) -> Self {
+        Self::Freq
+    }
+}
+
+impl From<StftDomain> for AnyDomain {
+    fn from(_: StftDomain) -> Self {
+        Self::Stft
     }
 }
 
 impl core::fmt::Display for AnyDomain {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
-            Self::Time(inner) => inner.fmt(f),
-            Self::Freq(inner) => inner.fmt(f),
+            Self::Time => TimeDomain {}.fmt(f),
+            Self::Freq => FreqDomain {}.fmt(f),
+            Self::Stft => StftDomain {}.fmt(f),
         }
     }
 }

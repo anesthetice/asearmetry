@@ -1,0 +1,114 @@
+
+HRTF_Measurement:
+  type: article
+  title: 'Measurement of Head-Related Transfer Functions: A Review'
+  author:
+  - Li, Song
+  - Peissig, Jürgen
+  date: 2020
+  url: https://www.mdpi.com/2076-3417/10/14/5014
+  serial-number:
+    doi: 10.3390/app10145014
+    issn: 2076-3417
+  abstract: A head-related transfer function (HRTF) describes an acoustic transfer function between a point sound source in the free-field and a defined position in the listener’s ear canal, and plays an essential role in creating immersive virtual acoustic environments (VAEs) reproduced over headphones or loudspeakers. HRTFs are highly individual, and depend on directions and distances (near-field HRTFs). However, the measurement of high-density HRTF datasets is usually time-consuming, especially for human subjects. Over the years, various novel measurement setups and methods have been proposed for the fast acquisition of individual HRTFs while maintaining high measurement accuracy. This review paper provides an overview of various HRTF measurement systems and some insights into trends in individual HRTF measurements.
+  parent:
+    type: periodical
+    title: Applied Sciences
+    issue: 14
+    volume: 10
+
+3D_Tune-In_Toolkit:
+  type: article
+  title: '3D Tune-In Toolkit: An open-source library for real-time binaural spatialisation'
+  author:
+  - Cuevas-Rodríguez, Maria
+  - Picinali, Lorenzo
+  - González-Toledo, Daniel
+  - Garre, Carlos
+  - de la Rubia-Cuestas, Ernesto
+  - Molina-Tanco, Luis
+  - Reyes-Lecuona, Arcadio
+  date: 2019
+  page-range: 1-37
+  url: https://doi.org/10.1371/journal.pone.0211899
+  serial-number:
+    doi: 10.1371/journal.pone.0211899
+  parent:
+    type: periodical
+    title: PLOS ONE
+    publisher: Public Library of Science
+    issue: 3
+    volume: 14
+
+STFT_AudioLabs:
+  type: article
+  title: "Discrete Short-Time Fourier Transform (STFT)"
+  author:
+    - Müller, Meinard
+    - Zalkow, Frank 
+  url:
+    value: https://www.audiolabs-erlangen.de/resources/MIR/FMP/C2/C2_STFT-Basic.html
+    date: 2026-08-11
+  parent:
+    type: blog
+    title: "International Audio Laboratories Erlangen"
+
+STFT_SciPy:
+  type: article
+  title: "Signal Processing"
+  author: "The SciPy Contributors"
+  url:
+    value: https://docs.scipy.org/doc/scipy/tutorial/signal.html#tutorial-stft
+    date: 2026-08-11
+  parent:
+    type: blog
+    title: "SciPy User Guide"
+
+SciPy_full:
+  type: article
+  title: "SciPy 1.0: Fundamental Algorithms for Scientific Computing in Python"
+  author:
+  - Virtanen, Pauli
+  - Gommers, Ralf
+  - Oliphant, Travis E.
+  - Haberland, Matt
+  - Reddy, Tyler
+  - Cournapeau, David
+  - Burovski, Evgeni
+  - Peterson, Pearu
+  - Weckesser, Warren
+  - Bright, Jonathan
+  - van der Walt, Stéfan J.
+  - Brett, Matthew
+  - Wilson, Joshua
+  - Millman, K. Jarrod
+  - Mayorov, Nikolay
+  - Nelson, Andrew R. J.
+  - Jones, Eric
+  - Kern, Robert
+  - Larson, Eric
+  - Carey, C J
+  - Polat, İlhan
+  - Feng, Yu
+  - Moore, Eric W.
+  - VanderPlas, Jake
+  - Laxalde, Denis
+  - Perktold, Josef
+  - Cimrman, Robert
+  - Henriksen, Ian
+  - Quintero, E. A.
+  - Harris, Charles R.
+  - Archibald, Anne M.
+  - Ribeiro, Antônio H.
+  - Pedregosa, Fabian
+  - van Mulbregt, Paul
+  - SciPy 1.0 Contributors
+  date: 2020
+  page-range: 261-272
+  url: https://doi.org/10.1038/s41592-019-0686-2
+  serial-number:
+    doi: 10.1038/s41592-019-0686-2
+  parent:
+    type: periodical
+    title: Nature Methods
+    volume: 17

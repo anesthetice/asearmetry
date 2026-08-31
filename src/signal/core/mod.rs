@@ -9,8 +9,8 @@ mod domain;
 mod sample;
 
 // Exports
-pub use domain::{AnyDomain, Domain, FreqDomain, TimeDomain};
-pub use sample::Sample;
+pub use domain::{AnyDomain, Domain, FreqDomain, StftDomain, StftInfo, TimeDomain};
+pub use sample::{IsKnownSampleType, KnownSampleType, Sample};
 
 /// Represents a potentially multichannel discrete signal
 ///
@@ -22,18 +22,18 @@ pub use sample::Sample;
 /// the generic `S` refers to the underlying sample type used,
 /// and the generic `D` represents the domain of the signal,
 /// which can currently be either `TimeDomain` or `FreqDomain`.
-#[derive(Clone, PartialEq, PartialOrd)]
+#[derive(Clone)]
 pub struct Signal<const C: usize, S: Sample, D: Domain> {
     pub channels: [Vec<S>; C],
     pub sampling_rate: Option<crate::math::Hertz>,
-    pub _domain: D,
+    pub _domain: core::marker::PhantomData<D>,
 }
 
 /// A borrowed, channel-major view into sliced sample data.
 /// This is the non-owning counterpart to [`Signal`].
-#[derive(Clone, Copy, PartialEq, PartialOrd)]
+#[derive(Clone, Copy)]
 pub struct SignalSlice<'data, const C: usize, S: Sample, D: Domain> {
     pub channels: [&'data [S]; C],
     pub sampling_rate: Option<crate::math::Hertz>,
-    pub _domain: D,
+    pub _domain: core::marker::PhantomData<D>,
 }

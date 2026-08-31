@@ -5,7 +5,7 @@
 */
 
 use crate::{
-    coordinates::Cart3D,
+    coordinates::{Cart3D, write_float},
     math::{Meters, Radians},
 };
 use approx::{AbsDiffEq, RelativeEq};
@@ -27,23 +27,15 @@ pub struct Sphere3D {
 impl std::fmt::Debug for Sphere3D {
     #[rustfmt::skip]
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        let write_float = |float: f64, f: &mut std::fmt::Formatter<'_>| {
-            if float.abs() > 1E-3 { write!(f, "{:.3}", float) }
-            else if float.abs() < 1E-6 { write!(f, "0.0") }
-            else { write!(f, "{:.1E}", float) }
-        };
-
         write!(f, "(r: ")?;
-        write_float(self.r, f)?;
+        write_float(self.r, f, false)?;
 
-        let θ_opi = self.θ / PI;
         write!(f, ", θ: ")?;
-        write_float(θ_opi, f)?;
+        write_float(self.θ, f, true)?;
 
-        let φ_opi = self.φ / PI;
-        write!(f, "⋅π, φ: ")?;
-        write_float(φ_opi, f)?;
-        write!(f, "⋅π)")?;
+        write!(f, ", φ: ")?;
+        write_float(self.φ, f, true)?;
+        write!(f, ")")?;
 
         Ok(())
     }

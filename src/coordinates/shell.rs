@@ -4,9 +4,11 @@
  * file, You can obtain one at https://mozilla.org/MPL/2.0/.
 */
 
+use approx::{AbsDiffEq, RelativeEq};
+
 use super::{clamp_azimuth, clamp_zenith};
-use crate::coordinates::{Cart3D, Sphere3D};
-use crate::math::Radians;
+use crate::coordinates::{Cart3D, Sphere3D, write_float};
+use crate::math::{Degrees, Meters, Radians};
 use std::f64::consts::{GOLDEN_RATIO, PI, TAU};
 
 #[derive(Clone, Copy, PartialEq)]
@@ -23,20 +25,12 @@ pub struct Shell2D {
 impl std::fmt::Debug for Shell2D {
     #[rustfmt::skip]
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        let write_float = |float: f64, f: &mut std::fmt::Formatter<'_>| {
-            if float.abs() > 1E-3 { write!(f, "{:.3}", float) }
-            else if float.abs() < 1E-6 { write!(f, "0.0") }
-            else { write!(f, "{:.1E}", float) }
-        };
-
-        let θ_opi = self.θ / PI;
         write!(f, "(θ: ")?;
-        write_float(θ_opi, f)?;
+        write_float(self.θ, f, true)?;
 
-        let φ_opi = self.φ / PI;
-        write!(f, "⋅π, φ: ")?;
-        write_float(φ_opi, f)?;
-        write!(f, "⋅π)")?;
+        write!(f, ", φ: ")?;
+        write_float(self.φ, f, true)?;
+        write!(f, ")")?;
 
         Ok(())
     }
@@ -51,6 +45,13 @@ impl std::fmt::Display for Shell2D {
 impl Shell2D {
     pub fn new(θ: Radians, φ: Radians) -> Self {
         Self { θ, φ }
+    }
+
+    pub fn new_from_degrees(θ: Degrees, φ: Degrees) -> Self {
+        Self {
+            θ: TAU * θ / 360.0,
+            φ: TAU * φ / 360.0,
+        }
     }
 
     pub fn clamp_angles_in_place(&mut self) {
@@ -81,20 +82,31 @@ impl Shell2D {
             .collect()
     }
 
-    /// Angular distance (not euclidian)
-    pub fn dist(&self, other: Self) -> f64 {
-        let θ1 = self.θ;
-        let θ2 = other.θ;
-        let θ_diff = f64::min((θ1 - θ2).abs(), TAU - (θ1 - θ2).abs());
+    pub fn dist_angular(&self, other: Self) -> Radians {
+        self.into_unit_vec_cart()
+            .angle_with(other.into_unit_vec_cart())
+    }
+
+    /* Still somewhat lazy
+    pub fn dist_angular(&self, other: Self) -> Radians {
+        let a = self.into_unit_vec_cart();
+        let b = other.into_unit_vec_cart();
+
+        f64::acos(a.dot(b).clamp(0.0, 1.0))
+    }
+    */
+
+    /* The lazy man's angular distance (meaning incorrect)
+    pub fn dist_angular(&self, other: Self) -> f64 {
+        let θ_diff = f64::min((a.θ - b.θ).abs(), TAU - (a.θ - b.θ).abs());
         debug_assert!(θ_diff < PI + f64::EPSILON);
 
-        let φ1 = self.φ;
-        let φ2 = other.φ;
-        let φ_diff = φ1 - φ2;
+        let φ_diff = a.φ - b.φ;
         debug_assert!(φ_diff < PI + f64::EPSILON);
 
         (θ_diff.powi(2) + φ_diff.powi(2)).sqrt()
     }
+    */
 
     pub fn is_nan(&self) -> bool {
         self.θ.is_nan() || self.φ.is_nan()
@@ -108,6 +120,22 @@ impl Shell2D {
         // Under IEEE 754, -0.0 is equal to 0.0
         self.θ == 0.0 && self.φ == 0.0
     }
+
+    pub fn into_spherical(self, r: Meters) -> Sphere3D {
+        Sphere3D {
+            r,
+            θ: self.θ,
+            φ: self.φ,
+        }
+    }
+
+    pub fn into_unit_vec_cart(self) -> Cart3D {
+        Cart3D {
+            x: self.φ.sin() * self.θ.cos(),
+            y: self.φ.sin() * self.θ.sin(),
+            z: -self.φ.cos(),
+        }
+    }
 }
 
 impl Default for Shell2D {
@@ -116,6 +144,12 @@ impl Default for Shell2D {
             θ: 0.0,
             φ: PI / 2.0,
         }
+    }
+}
+
+impl From<(Radians, Radians)> for Shell2D {
+    fn from(v: (Radians, Radians)) -> Self {
+        Self { θ: v.0, φ: v.1 }
     }
 }
 
@@ -171,6 +205,31 @@ impl rstar::PointDistance for Shell2D {
         &self,
         point: &<Self::Envelope as rstar::Envelope>::Point,
     ) -> <<Self::Envelope as rstar::Envelope>::Point as rstar::Point>::Scalar {
-        self.dist(point.into())
+        self.dist_angular(point.into())
+    }
+}
+
+impl AbsDiffEq for Shell2D {
+    type Epsilon = f64;
+    fn default_epsilon() -> Self::Epsilon {
+        f64::EPSILON
+    }
+    fn abs_diff_eq(&self, other: &Self, epsilon: Self::Epsilon) -> bool {
+        f64::abs_diff_eq(&self.θ, &other.θ, epsilon) && f64::abs_diff_eq(&self.φ, &other.φ, epsilon)
+    }
+}
+
+impl RelativeEq for Shell2D {
+    fn default_max_relative() -> Self::Epsilon {
+        f64::default_max_relative()
+    }
+    fn relative_eq(
+        &self,
+        other: &Self,
+        epsilon: Self::Epsilon,
+        max_relative: Self::Epsilon,
+    ) -> bool {
+        f64::relative_eq(&self.θ, &other.θ, epsilon, max_relative)
+            && f64::relative_eq(&self.φ, &other.φ, epsilon, max_relative)
     }
 }

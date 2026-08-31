@@ -1,10 +1,15 @@
 /* Any copyright is dedicated to the Public Domain.
  * https://creativecommons.org/publicdomain/zero/1.0/ */
 
-use asearmetry::audio::MonoAudioBuf;
+mod common;
+use common::get_example_filepath;
+
+use asearmetry::prelude::*;
 use itertools::Itertools;
 
 fn main() {
+    env_logger::Builder::from_env(env_logger::Env::default().default_filter_or("debug")).init();
+
     #[cfg(feature = "plot")]
     check_resampling();
 
@@ -17,12 +22,15 @@ pub fn check_resampling() {
     use asearmetry::signal::DSP;
     use kuva::prelude::*;
 
-    let s1 = MonoAudioBuf::merge_many([
-        MonoAudioBuf::sinusoidal(5.0, 2000.0, 1.0, 2.0, 0.0),
-        MonoAudioBuf::sinusoidal(5.0, 2000.0, 0.5, 4.1, 1.0),
-        MonoAudioBuf::sinusoidal(5.0, 2000.0, 0.1, 9.8, 1.0),
-        MonoAudioBuf::sinusoidal(5.0, 2000.0, 4.0, 0.2, 0.5),
-    ])
+    let s1 = MonoAudioBuf::merge_many(
+        [
+            MonoAudioBuf::sinusoidal(5.0, 2000.0, 1.0, 2.0, 0.0),
+            MonoAudioBuf::sinusoidal(5.0, 2000.0, 0.5, 4.1, 1.0),
+            MonoAudioBuf::sinusoidal(5.0, 2000.0, 0.1, 9.8, 1.0),
+            MonoAudioBuf::sinusoidal(5.0, 2000.0, 4.0, 0.2, 0.5),
+        ],
+        None,
+    )
     .normalize();
 
     let sr1_3 = s1.resample(210.0, 3);
@@ -47,16 +55,16 @@ pub fn check_resampling() {
 
     #[rustfmt::skip]
     let plots = vec![
-        s1.plot_builder().plot_line_stroke_width(2.5).build().plot(),
-        sr1_3.plot_builder().plot_line_stroke_width(2.5).build().plot(),
-        sr1_7.plot_builder().plot_line_stroke_width(2.5).build().plot(),
-        sr1_17.plot_builder().plot_line_stroke_width(2.5).build().plot(),
-        sr1_pure.plot_builder().plot_line_stroke_width(2.5).build().plot(),
-        s2.plot_builder().plot_line_stroke_width(2.5).build().plot(),
-        sr2_3.plot_builder().plot_line_stroke_width(2.5).build().plot(),
-        sr2_7.plot_builder().plot_line_stroke_width(2.5).build().plot(),
-        sr2_17.plot_builder().plot_line_stroke_width(2.5).build().plot(),
-        sr2_pure.plot_builder().plot_line_stroke_width(2.5).build().plot(),
+        s1.plot_builder().plot_stroke_width(2.5).build().plot(),
+        sr1_3.plot_builder().plot_stroke_width(2.5).build().plot(),
+        sr1_7.plot_builder().plot_stroke_width(2.5).build().plot(),
+        sr1_17.plot_builder().plot_stroke_width(2.5).build().plot(),
+        sr1_pure.plot_builder().plot_stroke_width(2.5).build().plot(),
+        s2.plot_builder().plot_stroke_width(2.5).build().plot(),
+        sr2_3.plot_builder().plot_stroke_width(2.5).build().plot(),
+        sr2_7.plot_builder().plot_stroke_width(2.5).build().plot(),
+        sr2_17.plot_builder().plot_stroke_width(2.5).build().plot(),
+        sr2_pure.plot_builder().plot_stroke_width(2.5).build().plot(),
     ];
 
     let layouts = plots
